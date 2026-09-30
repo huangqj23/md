@@ -1,0 +1,131 @@
+# 信源配置。kind 决定默认可信度标签：
+#   official→官方  paper→论文  model/release/repo→代码  price→数据
+#   media/newsletter→媒体  community/social/inbox→社区
+# 可以用 label 覆盖；track 是主线提示（llm / agent / vision），不写就按关键词判断。
+# 2026-09-30 已实测本机可访问的才放进来。
+
+# 时间窗口：收“上次生成之后”的动态，最少 24 小时、最多 72 小时（周末停一天也不会漏）；第一次运行按 26 小时
+window: {default_hours: 26, min_hours: 24, max_hours: 72}
+
+# 版面：头条 1 条 + 要闻 main 条（平铺，不分栏）+ 快讯 briefs 条；备选进审稿清单；配图最多 max_images 张
+layout: {main: 15, briefs: 10, backup: 20, max_images: 16}
+
+feeds:
+  # ---- 官方博客（有官方 RSS）
+  - {key: openai-news, name: OpenAI 官方博客, url: "https://openai.com/news/rss.xml", kind: official}
+  - {key: deepmind-blog, name: Google DeepMind 博客, url: "https://deepmind.google/blog/rss.xml", kind: official}
+  - {key: google-research, name: Google Research 博客, url: "https://research.google/blog/rss/", kind: official}
+  - {key: hf-blog, name: Hugging Face 博客, url: "https://huggingface.co/blog/feed.xml", kind: official}
+  - {key: msr-blog, name: Microsoft Research 博客, url: "https://www.microsoft.com/en-us/research/feed/", kind: official, filter_keywords: true}
+  - {key: nvidia-dev, name: NVIDIA 技术博客, url: "https://developer.nvidia.com/blog/feed", kind: official, filter_keywords: true}
+  - {key: apple-ml, name: Apple 机器学习研究, url: "https://machinelearning.apple.com/rss.xml", kind: official}
+  # 阿里巴巴集团的官方新闻站（英文），Qwen、阿里云的发布会在这里发稿；只留 AI 相关的
+  - {key: alizila, name: Alizila（阿里巴巴官方新闻）, url: "https://www.alizila.com/feed/", kind: official, filter_keywords: true, max_items: 8}
+
+  # ---- 官方没有 RSS：用 Olshansk/rss-feeds 的镜像（GitHub Actions 定时抓取生成）
+  - {key: anthropic-news, name: Anthropic 官方新闻, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_news.xml", kind: official}
+  - {key: anthropic-engineering, name: Anthropic 工程博客, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_engineering.xml", kind: official, track: agent}
+  # 这个镜像的标题前面粘着日期和栏目名（“Sep 29, 2026Frontier Red TeamGLM-5.3 …”），用 title_strip 去掉
+  - {key: anthropic-research, name: Anthropic 研究, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_research.xml", kind: official,
+     title_strip: '^[A-Z][a-z]{2} \d{1,2}, \d{4}(?:Frontier Red Team|Societal Impacts|Science|Economics|Economic Research|Interpretability|Alignment|Policy|Announcements|Product)?'}
+  - {key: claude-blog, name: Claude 博客, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_claude.xml", kind: official}
+  - {key: openai-developer, name: OpenAI 开发者博客, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_openai_developer.xml", kind: official, track: agent}
+  - {key: openai-research, name: OpenAI 研究, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_openai_research.xml", kind: official}
+  - {key: google-ai, name: Google AI 博客, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_google_ai.xml", kind: official}
+  - {key: meta-ai, name: Meta AI 博客, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_meta_ai.xml", kind: official}
+  - {key: mistral, name: Mistral 新闻, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_mistral.xml", kind: official}
+  - {key: xai-news, name: xAI 新闻, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_xainews.xml", kind: official}
+  - {key: ollama-blog, name: Ollama 博客, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_ollama.xml", kind: official, track: llm}
+  - {key: cursor-blog, name: Cursor 博客, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_cursor.xml", kind: official, track: agent}
+  - {key: openai-engineering, name: OpenAI 工程博客, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_openai_engineering.xml", kind: official}
+  - {key: cohere, name: Cohere 博客, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_cohere.xml", kind: official}
+  - {key: perplexity, name: Perplexity 博客, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_perplexity_hub.xml", kind: official}
+  - {key: the-batch, name: The Batch（DeepLearning.AI）, url: "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_the_batch.xml", kind: newsletter}
+
+  # ---- 海外 AI 新闻媒体（2026-10 扩充）
+  - {key: the-decoder, name: The Decoder, url: "https://the-decoder.com/feed/", kind: media, max_items: 10}
+  - {key: techcrunch-ai, name: TechCrunch AI, url: "https://techcrunch.com/category/artificial-intelligence/feed/", kind: media, max_items: 10}
+  - {key: verge-ai, name: The Verge AI, url: "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml", kind: media, max_items: 8}
+  - {key: arstechnica-ai, name: Ars Technica AI, url: "https://arstechnica.com/ai/feed/", kind: media, max_items: 8}
+  - {key: marktechpost, name: MarkTechPost, url: "https://www.marktechpost.com/feed/", kind: media, max_items: 8}
+  - {key: mit-tr-ai, name: MIT Technology Review AI, url: "https://www.technologyreview.com/topic/artificial-intelligence/feed", kind: media, max_items: 5}
+  - {key: techmeme, name: Techmeme, url: "https://www.techmeme.com/feed.xml", kind: media, filter_keywords: true, max_items: 8}
+
+  # ---- 视觉 / 具身
+  - {key: roboflow-blog, name: Roboflow 博客, url: "https://blog.roboflow.com/rss/", kind: media, track: vision, max_items: 5}
+  - {key: learnopencv, name: LearnOpenCV, url: "https://learnopencv.com/feed/", kind: media, track: vision, max_items: 3}
+  - {key: robot-report, name: The Robot Report, url: "https://www.therobotreport.com/feed/", kind: media, track: vision, filter_keywords: true, max_items: 5}
+
+  # ---- 线索：海外 newsletter（只用来发现线索，正文不照搬）
+  # AINews 2026-09 起发在 Latent Space；parser: ainews 会拆出其中的「AI Twitter Recap」逐条当作 X 线索
+  - {key: ainews, name: AINews（Latent Space）, url: "https://www.latent.space/feed", kind: newsletter, parser: ainews, max_items: 40}
+  - {key: simonw, name: Simon Willison, url: "https://simonwillison.net/atom/everything/", kind: newsletter, max_items: 8}
+  - {key: interconnects, name: Interconnects, url: "https://www.interconnects.ai/feed", kind: newsletter}
+  - {key: importai, name: Import AI, url: "https://importai.substack.com/feed", kind: newsletter}
+  # TLDR AI：RSS 每期只有一条链接，parser: tldr 会打开当期网页，把每条（跳过广告）拆成线索，链接指向一手来源
+  # RSS 里每期只有日期（记作 UTC 0 点）。当期讲的是美国前一天的新闻，所以就按这个时间算：早上跑能收到当期；
+  # 下午跑时新一期还没发（北京时间傍晚才发），上一期是前天的新闻，被窗口挡掉是对的
+  - {key: tldr-ai, name: TLDR AI, url: "https://tldr.tech/api/rss/ai", kind: newsletter, parser: tldr, max_items: 20}
+
+  # ---- 社区
+  - {key: reddit-localllama, name: Reddit r/LocalLLaMA, url: "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day", kind: community, track: llm, max_items: 12}
+
+  # ---- 国内媒体：2026-09-30 起不收（用户要求媒体只看国外的）。国内大模型公司自己的发布照收，见下面的 labs、
+  # hf.orgs 和上面的 Alizila。要恢复就去掉下面的注释（机器之心 RSS 已转付费、36氪 feed 反爬、虎嗅连不上，本来就不收）
+  # - {key: qbitai, name: 量子位, url: "https://www.qbitai.com/feed", kind: media}
+  # - {key: infoq-cn, name: InfoQ 中文, url: "https://www.infoq.cn/feed", kind: media, filter_keywords: true, max_items: 8}
+  # - {key: leiphone, name: 雷峰网, url: "https://www.leiphone.com/feed", kind: media, filter_keywords: true, max_items: 8}
+  # - {key: ithome, name: IT之家, url: "https://www.ithome.com/rss/", kind: media, filter_keywords: true, max_items: 10}
+  # - {key: ifanr, name: 爱范儿, url: "https://www.ifanr.com/feed", kind: media, filter_keywords: true, max_items: 5}
+  # - {key: geekpark, name: 极客公园, url: "https://www.geekpark.net/rss", kind: media, filter_keywords: true, max_items: 5}
+  # - {key: tmtpost, name: 钛媒体, url: "https://www.tmtpost.com/rss.xml", kind: media, filter_keywords: true, max_items: 5}
+
+# 国内大模型公司自己的发布渠道（ai_daily/collect/labs.py）：
+# - github_orgs：组织新建的公开仓库（开源发布多半从新仓库开始），每个组织查一次 GitHub API；
+# - deepseek_news：DeepSeek API 文档的新闻页（模型发布、API 和价格变动）；
+# - zai_releases：Z.ai（智谱）的新模型发布页。
+# Qwen 官网、StepFun、MiniMax、Kimi 的新闻页是前端渲染或者没有日期，抓不到；它们的发布靠 HF org、GitHub 组织、
+# X 线索（AINews）和国外媒体覆盖。
+labs:
+  github_orgs: [deepseek-ai, QwenLM, zai-org, stepfun-ai, MoonshotAI, MiniMax-AI, ByteDance-Seed, Tencent-Hunyuan,
+                XiaomiMiMo, inclusionAI, meituan-longcat, OpenBMB, InternLM, OpenGVLab]
+  deepseek_news: true
+  zai_releases: true
+
+# 关键仓库的 releases.atom：每个仓库每天只取最新一版，值不值得写交给选题判断
+github_releases:
+  llm: [vllm-project/vllm, sgl-project/sglang, ggml-org/llama.cpp, huggingface/transformers, huggingface/trl, verl-project/verl, ollama/ollama, NVIDIA/TensorRT-LLM]
+  agent: [openai/codex, anthropics/claude-code, google-gemini/gemini-cli, anthropics/claude-agent-sdk-python, openai/openai-agents-python, langchain-ai/langgraph, modelcontextprotocol/modelcontextprotocol, huggingface/smolagents, OpenHands/OpenHands, crewAIInc/crewAI]
+  vision: [ultralytics/ultralytics, roboflow/supervision, huggingface/lerobot]
+
+hf:
+  daily_papers_limit: 25
+  trending_limit: 40
+  trending_max_age_hours: 72   # 热门榜上只收 3 天内上传的模型：老模型上榜不算新闻
+  per_org: 5
+  # 按 org 拉新上传的模型（国内大厂的发布基本都会同步到 HF）
+  orgs: [deepseek-ai, Qwen, moonshotai, zai-org, MiniMaxAI, ByteDance-Seed, tencent, baidu, stepfun-ai, internlm,
+         openbmb, OpenGVLab, XiaomiMiMo, inclusionAI, meituan-longcat, meta-llama, google, microsoft, nvidia,
+         mistralai, openai, ibm-granite, allenai, HuggingFaceTB, apple, black-forest-labs, facebook]
+
+# GitHub Trending：综合榜 + Python 榜。上榜本身就是“今天”的信号（常常是因为当天有发布），
+# 但建了一年以上、常年挂榜的老项目不收；创建时间用 GitHub API 查，查过的存进数据库（设了 GITHUB_TOKEN 会带上；
+# 未认证每小时 60 次，被限流时剩下的项目不查、条目保留），摘要里写明“创建于 N 天前”，老项目值不值得写交给选题判断。
+# 2026-09-30 实测当天上榜的 AI 项目最新的也建于 83 天前，所以门槛是一年而不是一个月。
+github_trending: {pages: ["", "python"], max_items: 15, max_repo_age_days: 365}
+hn: {min_points: 80, max_items: 15}
+openrouter: {enabled: true}
+
+# X 上这些账号算“官方”（AINews 回顾里链接到它们的推文，可信度标“官方”）
+official_x_handles: [OpenAI, OpenAIDevs, AnthropicAI, claudeai, GoogleDeepMind, GoogleAI, googleaidevs, xai, deepseek_ai,
+                     Alibaba_Qwen, Kimi_Moonshot, Zai_org, MiniMax__AI, huggingface, MistralAI, AIatMeta, nvidia,
+                     NVIDIAAIDev, cursor_ai, OpenRouterAI, ollama, vllm_project, lmsysorg, StepFun_ai, XiaomiMiMo]
+
+# 判断“是不是 AI 相关”（HN、GitHub trending、带 filter_keywords 的信源）
+# 纯 ASCII 的词：3 个字符以内按整词匹配，更长的按词首匹配（agent 能匹配 agents）
+ai_keywords: [ai, llm, llms, gpt, claude, gemini, grok, llama, qwen, deepseek, mistral, kimi, glm, minimax, model, models,
+              agent, agentic, mcp, rag, transformer, diffusion, neural, inference, vllm, sglang, gguf, fine-tun, finetun,
+              lora, rlhf, reinforcement, embedding, multimodal, vision, vlm, ocr, yolo, segment, detection, robot,
+              embodied, copilot, codex, cursor, openai, anthropic, hugging, nvidia, gpu, cuda, tpu, speech, tts, whisper,
+              prompt, token, benchmark, machine learning, deep learning, chatbot, reasoning,
+              人工智能, 大模型, 智能体, 多模态, 机器学习, 深度学习, 具身, 机器人, 视觉, 推理, 算力, 模型]

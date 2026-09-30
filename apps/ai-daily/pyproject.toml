@@ -1,0 +1,37 @@
+[project]
+name = "ai-daily"
+version = "0.1.0"
+description = "hollis23 AI 早报：采集 → 去重 → 选题 → 中文初稿 → Obsidian"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.28",
+    "feedparser>=6.0",
+    "trafilatura>=2.0",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "openai>=1.40",
+    "anthropic>=1.9",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+ai-daily = "ai_daily.cli:main"
+ai-daily-host = "ai_daily.native_host:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ai_daily*"]
+
+[tool.setuptools.package-data]
+ai_daily = ["prompts/*.md", "templates/*.j2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

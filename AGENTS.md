@@ -27,6 +27,8 @@
 
 独立示例（不在 workspace 内）：`docs/examples/wechat-openapi-worker/` — 微信公众号 OpenAPI 代理 Worker。
 
+`apps/ai-daily` 是 Python 项目（AI 早报流水线，见其 README），不在 pnpm workspace 内，也不参与 ESLint；浏览器扩展的「AI 早报」面板通过 Native Messaging 调用它（见 [docs/ai-daily.md](./docs/ai-daily.md)）。测试：`apps/ai-daily/.venv/Scripts/python -m pytest`。
+
 ## 常用命令
 
 ### 根目录

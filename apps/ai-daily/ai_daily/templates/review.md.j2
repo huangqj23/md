@@ -1,0 +1,44 @@
+# {{ day }} 审稿清单与备选
+
+正文：[[{{ article_stem }}]]（这份清单不发布）
+
+## 审稿清单
+
+- [ ] 写头条的“我的看法”（替换【我的看法：待写】）
+- [ ] 处理正文里的【待核对】（共 {{ n_flags }} 处）：核对原文、改好正文，再删掉标记
+- [ ] 从下面的候选标题里选一个，替换正文第一行
+- [ ] （可选）在快讯前面加“今日一测”
+- [ ] 运行 `ai-daily publish --date {{ day }}`，生成内嵌版后用 md 存到公众号草稿箱；发表时在创作声明里选 AI 相关的声明，不声明原创
+
+## 候选标题
+
+{% for t in titles %}
+{{ loop.index }}. {{ t }}
+{% endfor %}
+
+## 头条的 AI 建议角度
+
+只作参考，“我的看法”请自己写：{{ headline.engineer_note or "（无）" }}
+
+## 备选
+
+没进正文的事件。想换进去，就把整段复制到对应栏目，自己写一两句。
+
+{% for ev in backup %}
+### {{ ev.title }}
+
+`{{ ev.label }}` · {{ track_name(ev.track) }} · {{ ev.score | round(0) | int }} 分 · [{{ ev.main_item.source_name }}]({{ ev.main_item.url }})
+
+{{ ev.why or clip(ev.main_item.summary, 120) }}
+
+{% else %}
+（无）
+{% endfor %}
+## 本次运行
+
+- 采集：{{ n_items }} 条新条目 → 候选 {{ n_candidates }} 条 → 事件 {{ n_events }} 个
+- LLM：{{ llm_usage }}
+- 各信源：
+{% for name, value in stats %}
+  - {{ name }}：{{ value }}
+{% endfor %}

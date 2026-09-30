@@ -1,0 +1,79 @@
+{% macro badge(ev) %}
+{% set it = ev.main_item %}
+`{{ ev.label }}` · [{{ it.source_name }}]({{ it.url }}){% if it.published %} · {{ local_date(it.published) }}{% endif %}{% for o in others(ev) %} · 另见 [{{ o.source_name }}]({{ o.url }}){% endfor %}
+{% endmacro %}
+{% macro figure(ev) %}
+{% if ev.image_path %}
+![{{ ev.display_title }}]({{ ev.image_path }})
+
+{{ ev.image_credit }}
+
+{% endif %}
+{% endmacro %}
+{% macro details(ev, with_note=True) %}
+{% if ev.quotes %}
+> 原文：{{ ev.quotes[0].source_quote }}
+
+{% endif %}
+{% if ev.vram or (with_note and ev.engineer_note) %}
+{% if ev.vram %}
+- **显存估算**：{{ ev.vram }}
+{% endif %}
+{% if with_note and ev.engineer_note %}
+- **工程师视角**：{{ ev.engineer_note }}
+{% endif %}
+
+{% endif %}
+{% if ev.flags %}
+【待核对：{{ ev.flags | join("；") }}】
+
+{% endif %}
+{% endmacro %}
+# {{ title }}
+
+> **今日看点**
+{% for h in highlights %}
+> {{ loop.index }}. {{ h }}
+{% endfor %}
+
+## 头条｜{{ headline.display_title }}
+
+{{ badge(headline) }}
+
+{{ figure(headline) }}
+{% for p in headline.paragraphs %}
+{{ p }}
+
+{% endfor %}
+{{ details(headline, with_note=False) }}
+**我的看法**：【我的看法：待写】
+
+{% if main %}
+## 要闻
+
+{% for ev in main %}
+### {{ loop.index }}. {{ ev.display_title }}
+
+{{ badge(ev) }}
+
+{{ figure(ev) }}
+{% for p in ev.paragraphs %}
+{{ p }}
+
+{% endfor %}
+{{ details(ev) }}
+{% endfor %}
+{% endif %}
+{% if briefs %}
+## 快讯
+
+{% for ev in briefs %}
+- **{{ ev.headline }}**：{{ ev.brief }}（[{{ ev.main_item.source_name }}]({{ ev.main_item.url }})）
+{% endfor %}
+
+{% endif %}
+---
+
+本文由 AI 辅助收集信息、生成初稿，经人工核对并点评；图片版权归原作者，出处见图注。
+
+关注 hollis23：每天一份 AI 早报，只看一手来源；能跑的，我先跑一下。

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/" xml:lang="en-US">
+  <id>tag:github.com,2008:https://github.com/vllm-project/vllm/releases</id>
+  <link type="text/html" rel="alternate" href="https://github.com/vllm-project/vllm/releases"/>
+  <link type="application/atom+xml" rel="self" href="https://github.com/vllm-project/vllm/releases.atom"/>
+  <title>Release notes from vllm</title>
+  <updated>2026-09-30T00:33:58Z</updated>
+  <entry>
+    <id>tag:github.com,2008:Repository/599547518/v0.31.0rc2</id>
+    <updated>2026-09-30T00:33:58Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/vllm-project/vllm/releases/tag/v0.31.0rc2"/>
+    <title>v0.31.0rc2</title>
+    <content type="html">&lt;p&gt;[Bugfix][Mamba] Keep the prompt-end prefill checkpoint under sparse r…&lt;/p&gt;</content>
+    <author>
+      <name>JaredforReal</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/142211841?s=60&amp;v=4"/>
+  </entry>
+  <entry>
+    <id>tag:github.com,2008:Repository/599547518/v0.31.0rc1</id>
+    <updated>2026-09-29T03:18:39Z</updated>
+    <link rel="alternate" type="text/html" href="https://github.com/vllm-project/vllm/releases/tag/v0.31.0rc1"/>
+    <title>v0.31.0rc1: [CI/Build] Skip the snapshot runtime on CUDA 12.x images (#59118)</title>
+    <content type="html">&lt;p&gt;Signed-off-by: khluu &lt;a href=&quot;mailto:khluu000@gmail.com&quot;&gt;khluu000@gmail.com&lt;/a&gt;&lt;br&gt;
+Co-authored-by: Claude Opus 5.5 &lt;a href=&quot;mailto:noreply@anthropic.com&quot;&gt;noreply@anthropic.com&lt;/a&gt;&lt;br&gt;
+(cherry picked from commit &lt;a class=&quot;commit-link&quot; data-hovercard-type=&quot;commit&quot; data-hovercard-url=&quot;https://github.com/vllm-project/vllm/commit/aedaba8664f67d8ae1538e5e5cec2b1ce3f258dd/hovercard&quot; href=&quot;https://github.com/vllm-project/vllm/commit/aedaba8664f67d8ae1538e5e5cec2b1ce3f258dd&quot;&gt;&lt;tt&gt;aedaba8&lt;/tt&gt;&lt;/a&gt;)&lt;/p&gt;</content>
+    <author>
+      <name>khluu</name>
+    </author>
+    <media:thumbnail height="30" width="30" url="https://avatars.githubusercontent.com/u/51931015?s=60&amp;v=4"/>
+  </entry>
+</feed>
