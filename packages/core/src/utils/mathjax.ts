@@ -5,8 +5,11 @@ export const MATHJAX_LOCAL_URL = `./static/libs/mathjax/tex-svg.js`
 
 const MATHJAX_SCRIPT_ID = `MathJax-script`
 
+const EXTENSION_PAGE_PROTOCOL = /^(?:chrome|moz|safari-web)-extension:$/
+
 function getMathJaxScriptUrl(): string {
-  if (typeof window !== `undefined` && window.__MD_UTOOLS__)
+  // uTools and extension pages cannot load remote scripts; their builds ship MathJax locally.
+  if (typeof window !== `undefined` && (window.__MD_UTOOLS__ || EXTENSION_PAGE_PROTOCOL.test(window.location.protocol)))
     return MATHJAX_LOCAL_URL
   return MATHJAX_CDN_URL
 }

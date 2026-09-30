@@ -1,7 +1,8 @@
 import type * as vite from 'vite'
 import type * as wxt from 'wxt'
-import { writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { MATHJAX_CDN_URL, MATHJAX_LOCAL_URL } from '@md/core/utils/mathjax'
 import { parseHTML } from 'linkedom'
 import { hash } from 'ohash'
 import {
@@ -12,11 +13,43 @@ import {
 type AddedViteConfig = ReturnType<Parameters<typeof addViteConfig>[1]>
 type AddedVitePlugins = NonNullable<NonNullable<AddedViteConfig>['plugins']>
 
+/**
+ * Extension pages only run scripts shipped with the extension (CSP
+ * `script-src 'self'`), so the CDN MathJax the web build uses is blocked and
+ * formulas never render. Bundle the same file, as the uTools build does.
+ * Cached on disk so rebuilds work offline; a failed download only warns.
+ */
+async function loadMathJaxForExtension(wxt: wxt.Wxt): Promise<string | null> {
+  const cacheFile = path.resolve(wxt.config.root, `node_modules/.cache/md-extension/mathjax-tex-svg.js`)
+  try {
+    return await readFile(cacheFile, `utf8`)
+  }
+  catch {}
+  try {
+    const response = await fetch(MATHJAX_CDN_URL)
+    if (!response.ok)
+      throw new Error(`HTTP ${response.status}`)
+    const contents = await response.text()
+    await mkdir(path.dirname(cacheFile), { recursive: true })
+    await writeFile(cacheFile, contents, `utf8`)
+    return contents
+  }
+  catch (error) {
+    wxt.logger.warn(`MathJax could not be bundled (${error instanceof Error ? error.message : error}); formulas will not render in the extension.`)
+    return null
+  }
+}
+
 export default defineWxtModule({
   async setup(wxt) {
     wxt.config.alias[`/src/main.ts`] = `./src/main.ts`
     wxt.config.alias[`/src/sidepanel.ts`] = `./src/sidepanel.ts`
     wxt.config.manifest.options_page = `options.html`
+    wxt.hook(`build:publicAssets`, async (_, files) => {
+      const contents = await loadMathJaxForExtension(wxt)
+      if (contents)
+        files.push({ relativeDest: MATHJAX_LOCAL_URL.replace(/^\.\//, ``), contents })
+    })
     wxt.hook(`entrypoints:grouped`, (_, groups) => {
       groups.push([{
         type: `options`,
