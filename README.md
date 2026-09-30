@@ -43,6 +43,7 @@
 - 支持多种图床（GitHub、阿里云、腾讯云、七牛云、MinIO、S3、Cloudflare R2 等）
 - 支持文件导入与导出
 - 集成主流 AI 模型（DeepSeek、OpenAI、通义千问、腾讯混元、火山方舟、302.AI 等），辅助内容创作
+- 浏览器扩展支持多平台发布，一键同步草稿到公众号、知乎、掘金、CSDN 等平台（[多平台发布说明](/docs/multi-platform-publish.md)）
 
 ## 支持的图床服务
 
@@ -61,6 +62,18 @@
 | 11  | [Telegram](https://core.telegram.org/api)              | 配置 `Bot Token`、`Chat ID` 参数                                           | [如何使用 Telegram 图床？](https://github.com/doocs/md/blob/main/docs/telegram-usage.md)                               |
 | 12  | [Cloudinary](https://cloudinary.com/)                  | 配置 `Cloud Name`、`API Key`、`API Secret` 参数                            | [如何使用 Cloudinary？](https://cloudinary.com/documentation/upload_images)                                            |
 | 13  | 自定义上传                                             | 是                                                                         | [如何自定义上传？](/docs/custom-upload.md)                                                                             |
+
+## 多平台发布（浏览器扩展）
+
+在扩展版编辑器中点击顶部「发布」（或「文件 → 多平台发布」），即可把当前文章填入各平台编辑器并**保存为草稿**。扩展不会自动点击发布，请在各平台检查排版后手动发布。
+
+- 支持平台：微信公众号、知乎、掘金、CSDN、今日头条、百家号、简书、B 站专栏、博客园
+- 按平台自动选择内容格式：Markdown 平台保留源码，公众号、百家号、B 站使用公众号样式 HTML
+- 公众号会自动把内嵌图片上传到素材库；其他平台需使用公网图片链接
+- 平台域名等权限均为可选权限，首次使用时才申请，并会检测各平台登录状态
+- 网页版不受影响，仍通过 [COSE](https://github.com/doocs/cose) 扩展发布
+
+详见 [多平台发布说明](/docs/multi-platform-publish.md)。
 
 ## 产品演示
 
