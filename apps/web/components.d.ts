@@ -153,6 +153,7 @@ declare module 'vue' {
     PreferencesDialog: typeof import('./src/components/editor/dialogs/PreferencesDialog.vue')['default']
     PreviewPanel: typeof import('./src/components/editor/PreviewPanel.vue')['default']
     Progress: typeof import('./src/components/ui/progress/Progress.vue')['default']
+    PublishDialog: typeof import('./src/components/editor/editor-header/PublishDialog.vue')['default']
     QiniuConfigForm: typeof import('./src/components/editor/dialogs/upload-providers/QiniuConfigForm.vue')['default']
     QuickCommandManager: typeof import('./src/components/ai/chat-box/QuickCommandManager.vue')['default']
     R2ConfigForm: typeof import('./src/components/editor/dialogs/upload-providers/R2ConfigForm.vue')['default']

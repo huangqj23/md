@@ -5,6 +5,7 @@ import dialog from './dialog'
 import editor from './editor'
 import marketplace from './marketplace'
 import notifications from './notifications'
+import publish from './publish'
 import store from './store'
 import upload from './upload'
 
@@ -15,6 +16,7 @@ export default {
   ...editor,
   ...marketplace,
   ...notifications,
+  ...publish,
   ...ai,
   ...upload,
   ...store,

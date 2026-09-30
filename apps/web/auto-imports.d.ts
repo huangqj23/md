@@ -76,6 +76,7 @@ declare global {
   const injectLocal: typeof import('@vueuse/core').injectLocal
   const isBuiltinQuickCommand: typeof import('./src/stores/quickCommands').isBuiltinQuickCommand
   const isDefined: typeof import('@vueuse/core').isDefined
+  const isNativePublishAvailable: typeof import('./src/stores/publish').isNativePublishAvailable
   const isProxy: typeof import('vue').isProxy
   const isReactive: typeof import('vue').isReactive
   const isReadonly: typeof import('vue').isReadonly
@@ -304,6 +305,7 @@ declare global {
   const usePreferredReducedMotion: typeof import('@vueuse/core').usePreferredReducedMotion
   const usePreferredReducedTransparency: typeof import('@vueuse/core').usePreferredReducedTransparency
   const usePrevious: typeof import('@vueuse/core').usePrevious
+  const usePublishStore: typeof import('./src/stores/publish').usePublishStore
   const useQuickCommandsStore: typeof import('./src/stores/quickCommands').useQuickCommandsStore
   const useRafFn: typeof import('@vueuse/core').useRafFn
   const useRefHistory: typeof import('@vueuse/core').useRefHistory
@@ -404,6 +406,9 @@ declare global {
   // @ts-ignore
   export type { Post } from './src/stores/post'
   import('./src/stores/post')
+  // @ts-ignore
+  export type { PublishInput } from './src/stores/publish'
+  import('./src/stores/publish')
   // @ts-ignore
   export type { QuickCommandPersisted, QuickCommandRuntime } from './src/stores/quickCommands'
   import('./src/stores/quickCommands')

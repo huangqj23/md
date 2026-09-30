@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { Cloud, Download, FileCode, FileCog, FileText, FolderKanban, FolderOpen, Package, Rows3, Settings, Share2, Upload } from '@lucide/vue'
+import { Cloud, Download, FileCode, FileCog, FileText, FolderKanban, FolderOpen, Package, Rows3, Send, Settings, Share2, Upload } from '@lucide/vue'
 import { PNG_SEGMENT_HEIGHTS } from '@/services/export'
 import { isShareUiEnabled } from '@/services/share/client'
 import { isSyncUiEnabled } from '@/services/sync/client'
 import { useEditorStore } from '@/stores/editor'
 import { useExportStore } from '@/stores/export'
+import { isNativePublishAvailable } from '@/stores/publish'
 import { useUIStore } from '@/stores/ui'
 
 const props = withDefaults(defineProps<{
@@ -21,9 +22,10 @@ const exportStore = useExportStore()
 const uiStore = useUIStore()
 
 const { isOpenPostSlider, isOpenFolderPanel } = storeToRefs(uiStore)
-const { toggleShowTemplateDialog, toggleShowImportMdDialog, toggleShowSyncDialog, toggleShowEditorStateDialog, toggleShowPreferencesDialog, openShareDialog, openPdfExportDialog } = uiStore
+const { toggleShowTemplateDialog, toggleShowImportMdDialog, toggleShowSyncDialog, toggleShowEditorStateDialog, toggleShowPreferencesDialog, openShareDialog, openPdfExportDialog, openPublishDialog } = uiStore
 const showSyncUi = isSyncUiEnabled()
 const showShareUi = isShareUiEnabled()
+const showPublish = isNativePublishAvailable()
 
 function openEditorStateDialog() {
   toggleShowEditorStateDialog(true)
@@ -134,6 +136,11 @@ function exportEditorContent2PDF() {
         </MenubarSubContent>
       </MenubarSub>
 
+      <MenubarItem v-if="showPublish" @click="openPublishDialog()">
+        <Send class="mr-2 size-4" />
+        {{ t('publish.menuItem') }}
+      </MenubarItem>
+
       <MenubarSeparator />
 
       <MenubarItem @click="openTemplateDialog()">
@@ -242,6 +249,11 @@ function exportEditorContent2PDF() {
           </MenubarSub>
         </MenubarSubContent>
       </MenubarSub>
+
+      <MenubarItem v-if="showPublish" @click="openPublishDialog()">
+        <Send class="mr-2 size-4" />
+        {{ t('publish.menuItem') }}
+      </MenubarItem>
 
       <MenubarSeparator />
 
