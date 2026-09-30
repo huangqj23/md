@@ -3,6 +3,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { loadEnv } from 'vite'
 import { defineConfig } from 'wxt'
+import { PUBLISH_API_PERMISSIONS } from './src/services/publish/permissions'
+import { PUBLISH_PLATFORMS } from './src/services/publish/platforms'
 import ViteConfig from './vite.config'
 
 function getRootPackageVersion() {
@@ -37,10 +39,23 @@ function getApiHostPermissions(mode: string): string[] {
   }
 }
 
+/**
+ * Multi-platform publishing asks for these only when first used, so installing
+ * or updating the extension requests nothing new. MV2 (Firefox) has no
+ * optional_host_permissions, so hosts go into optional_permissions there.
+ */
+function getPublishPermissions(browser: string, manifestVersion: 2 | 3) {
+  const hosts = [...new Set(PUBLISH_PLATFORMS.flatMap(platform => platform.hostPermissions))]
+  const apis = PUBLISH_API_PERMISSIONS.filter(permission => permission !== `tabGroups` || browser === `chrome` || browser === `edge`)
+  return manifestVersion === 2
+    ? { optional_permissions: [...apis, ...hosts] }
+    : { optional_permissions: [...apis], optional_host_permissions: hosts }
+}
+
 export default defineConfig({
   srcDir: `src`,
   modulesDir: `src/modules`,
-  manifest: ({ mode, browser }) => ({
+  manifest: ({ mode, browser, manifestVersion }) => ({
     name: `公众号内容编辑器`,
     version,
     icons: {
@@ -57,6 +72,7 @@ export default defineConfig({
       `https://*.qpic.cn/*`,
       `https://www.plantuml.com/*`,
     ],
+    ...getPublishPermissions(browser, manifestVersion),
     web_accessible_resources: [
       {
         resources: [`*.png`, `*.svg`, `injected.js`],
