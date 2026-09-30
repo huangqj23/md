@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { loadEnv } from 'vite'
 import { defineConfig } from 'wxt'
+import { NATIVE_PERMISSION } from './src/services/ai-daily/native'
 import { PUBLISH_API_PERMISSIONS } from './src/services/publish/permissions'
 import { PUBLISH_PLATFORMS } from './src/services/publish/platforms'
 import ViteConfig from './vite.config'
@@ -46,7 +47,10 @@ function getApiHostPermissions(mode: string): string[] {
  */
 function getPublishPermissions(browser: string, manifestVersion: 2 | 3) {
   const hosts = [...new Set(PUBLISH_PLATFORMS.flatMap(platform => platform.hostPermissions))]
-  const apis = PUBLISH_API_PERMISSIONS.filter(permission => permission !== `tabGroups` || browser === `chrome` || browser === `edge`)
+  const apis: string[] = PUBLISH_API_PERMISSIONS.filter(permission => permission !== `tabGroups` || browser === `chrome` || browser === `edge`)
+  // The AI daily panel talks to the local ai-daily program; its native host is only registered for Chromium browsers.
+  if (browser !== `firefox`)
+    apis.push(NATIVE_PERMISSION)
   return manifestVersion === 2
     ? { optional_permissions: [...apis, ...hosts] }
     : { optional_permissions: [...apis], optional_host_permissions: hosts }

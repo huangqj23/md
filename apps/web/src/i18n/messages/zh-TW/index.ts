@@ -1,4 +1,5 @@
 import ai from './ai'
+import aiDaily from './aiDaily'
 import chrome from './chrome'
 import common from './common'
 import dialog from './dialog'
@@ -17,6 +18,7 @@ export default {
   ...marketplace,
   ...notifications,
   ...publish,
+  ...aiDaily,
   ...ai,
   ...upload,
   ...store,
