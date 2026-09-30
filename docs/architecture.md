@@ -68,6 +68,7 @@ Web 端入口：
 | `components/ai/`     | AI 相关 UI                                                              |
 | `components/shared/` | 跨 feature 通用组件                                                     |
 | `entrypoints/`       | WXT 浏览器扩展入口                                                      |
+| `publish-agent/`     | 多平台发布代理，注入到各平台编辑器页面运行                              |
 
 ## 状态管理（Web）
 
@@ -97,6 +98,10 @@ Pinia stores 按领域划分：
 - **主题包**：安装后以 `mp:<uuid>` 作为独立主题出现在主题选择器；CSS 经 `applyTheme({ themeCSS })` 动态注入
 - **组件包**：安装后写入 `custom_components` 注册表
 - **Web UI**：`MarketplaceDialog`（文件菜单 / 右侧主题栏 / 组件对话框入口）
+
+## 多平台发布（扩展）
+
+扩展版的「发布」由 `services/publish/runner.ts` 逐个打开平台标签页，注入 `publish-agent.js`（MAIN world）填写标题和正文，只保存草稿。网页版仍走 COSE 扩展。详见 [multi-platform-publish.md](./multi-platform-publish.md)。
 
 ## 本地存储
 
