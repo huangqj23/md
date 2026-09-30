@@ -4,6 +4,7 @@ import { defineAsyncComponent } from 'vue'
 import { useEditorRefresh } from '@/composables/useEditorRefresh'
 import { delay } from '@/lib/delay'
 import { generatePureHTML, processClipboardContent } from '@/services/export'
+import { isAiDailyAvailable } from '@/stores/aiDaily'
 import { useEditorStore } from '@/stores/editor'
 import { useExportStore } from '@/stores/export'
 import { isNativePublishAvailable } from '@/stores/publish'
@@ -30,9 +31,12 @@ const SyncDialog = defineAsyncComponent(() => import('./SyncDialog.vue'))
 const ShareDialog = defineAsyncComponent(() => import('./ShareDialog.vue'))
 const PdfExportDialog = defineAsyncComponent(() => import('@/components/editor/dialogs/PdfExportDialog.vue'))
 const PublishDialog = defineAsyncComponent(() => import('./PublishDialog.vue'))
+const AiDailyDialog = defineAsyncComponent(() => import('./AiDailyDialog.vue'))
 
 // Inside the extension the editor publishes by itself; the web build keeps the COSE integration.
 const nativePublish = isNativePublishAvailable()
+// Needs the Chrome / Edge extension build, which declares the optional nativeMessaging permission.
+const aiDaily = isAiDailyAvailable()
 
 const editorStore = useEditorStore()
 const themeStore = useThemeStore()
@@ -44,7 +48,7 @@ const { editorRefresh } = useEditorRefresh()
 const { editor } = storeToRefs(editorStore)
 const { output } = storeToRefs(renderStore)
 const { primaryColor } = storeToRefs(themeStore)
-const { isOpenRightSlider, isShowSyncDialog, isShowAccountDialog, isShowShareDialog, isShowPublishDialog, isShowPdfExportDialog, isShowAboutDialog, isShowFundDialog, isShowEditorStateDialog, isShowPreferencesDialog, isShowMarkdownHelpDialog, isShowKeyboardShortcutsDialog, copyMode } = storeToRefs(uiStore)
+const { isOpenRightSlider, isShowSyncDialog, isShowAccountDialog, isShowShareDialog, isShowPublishDialog, isShowAiDailyDialog, isShowPdfExportDialog, isShowAboutDialog, isShowFundDialog, isShowEditorStateDialog, isShowPreferencesDialog, isShowMarkdownHelpDialog, isShowKeyboardShortcutsDialog, copyMode } = storeToRefs(uiStore)
 
 const isCopying = ref(false)
 
@@ -278,6 +282,14 @@ function copyToWeChat() {
       </Button>
 
       <Button
+        v-if="aiDaily"
+        variant="outline"
+        class="h-9 hidden md:inline-flex"
+        @click="uiStore.openAiDailyDialog()"
+      >
+        {{ t('aiDaily.button') }}
+      </Button>
+      <Button
         v-if="nativePublish"
         variant="outline"
         class="h-9 hidden md:inline-flex"
@@ -311,6 +323,7 @@ function copyToWeChat() {
   <ShareDialog v-if="isShowShareDialog" v-model:open="isShowShareDialog" />
   <PdfExportDialog v-if="isShowPdfExportDialog" v-model:open="isShowPdfExportDialog" />
   <PublishDialog v-if="nativePublish && isShowPublishDialog" v-model:open="isShowPublishDialog" />
+  <AiDailyDialog v-if="aiDaily && isShowAiDailyDialog" v-model:open="isShowAiDailyDialog" />
 </template>
 
 <style lang="less" scoped>

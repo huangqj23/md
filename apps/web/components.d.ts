@@ -15,6 +15,8 @@ declare module 'vue' {
     AccountDialog: typeof import('./src/components/editor/editor-header/AccountDialog.vue')['default']
     AIAssistantPanel: typeof import('./src/components/ai/chat-box/AIAssistantPanel.vue')['default']
     AIConfig: typeof import('./src/components/ai/chat-box/AIConfig.vue')['default']
+    AiDailyDialog: typeof import('./src/components/editor/editor-header/AiDailyDialog.vue')['default']
+    AiDailyLlmSettings: typeof import('./src/components/editor/editor-header/AiDailyLlmSettings.vue')['default']
     AIImageConfig: typeof import('./src/components/ai/image-generator/AIImageConfig.vue')['default']
     AIImageGeneratorPanel: typeof import('./src/components/ai/image-generator/AIImageGeneratorPanel.vue')['default']
     AIModelPicker: typeof import('./src/components/ai/AIModelPicker.vue')['default']

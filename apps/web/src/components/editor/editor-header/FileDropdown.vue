@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { Cloud, Download, FileCode, FileCog, FileText, FolderKanban, FolderOpen, Package, Rows3, Send, Settings, Share2, Upload } from '@lucide/vue'
+import { Cloud, Download, FileCode, FileCog, FileText, FolderKanban, FolderOpen, Newspaper, Package, Rows3, Send, Settings, Share2, Upload } from '@lucide/vue'
 import { PNG_SEGMENT_HEIGHTS } from '@/services/export'
 import { isShareUiEnabled } from '@/services/share/client'
 import { isSyncUiEnabled } from '@/services/sync/client'
+import { isAiDailyAvailable } from '@/stores/aiDaily'
 import { useEditorStore } from '@/stores/editor'
 import { useExportStore } from '@/stores/export'
 import { isNativePublishAvailable } from '@/stores/publish'
@@ -22,10 +23,11 @@ const exportStore = useExportStore()
 const uiStore = useUIStore()
 
 const { isOpenPostSlider, isOpenFolderPanel } = storeToRefs(uiStore)
-const { toggleShowTemplateDialog, toggleShowImportMdDialog, toggleShowSyncDialog, toggleShowEditorStateDialog, toggleShowPreferencesDialog, openShareDialog, openPdfExportDialog, openPublishDialog } = uiStore
+const { toggleShowTemplateDialog, toggleShowImportMdDialog, toggleShowSyncDialog, toggleShowEditorStateDialog, toggleShowPreferencesDialog, openShareDialog, openPdfExportDialog, openPublishDialog, openAiDailyDialog } = uiStore
 const showSyncUi = isSyncUiEnabled()
 const showShareUi = isShareUiEnabled()
 const showPublish = isNativePublishAvailable()
+const showAiDaily = isAiDailyAvailable()
 
 function openEditorStateDialog() {
   toggleShowEditorStateDialog(true)
@@ -141,6 +143,11 @@ function exportEditorContent2PDF() {
         {{ t('publish.menuItem') }}
       </MenubarItem>
 
+      <MenubarItem v-if="showAiDaily" @click="openAiDailyDialog()">
+        <Newspaper class="mr-2 size-4" />
+        {{ t('aiDaily.menuItem') }}
+      </MenubarItem>
+
       <MenubarSeparator />
 
       <MenubarItem @click="openTemplateDialog()">
@@ -253,6 +260,11 @@ function exportEditorContent2PDF() {
       <MenubarItem v-if="showPublish" @click="openPublishDialog()">
         <Send class="mr-2 size-4" />
         {{ t('publish.menuItem') }}
+      </MenubarItem>
+
+      <MenubarItem v-if="showAiDaily" @click="openAiDailyDialog()">
+        <Newspaper class="mr-2 size-4" />
+        {{ t('aiDaily.menuItem') }}
       </MenubarItem>
 
       <MenubarSeparator />

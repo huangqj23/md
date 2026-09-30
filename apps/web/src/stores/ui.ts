@@ -147,6 +147,12 @@ export const useUIStore = defineStore(`ui`, () => {
     isShowPublishDialog.value = true
   }
 
+  const isShowAiDailyDialog = ref(false)
+
+  function openAiDailyDialog() {
+    isShowAiDailyDialog.value = true
+  }
+
   const isShowPdfExportDialog = ref(false)
 
   const pdfExportOptions = store.reactive<PdfExportOptions>(
@@ -295,6 +301,8 @@ export const useUIStore = defineStore(`ui`, () => {
     openShareDialog,
     isShowPublishDialog,
     openPublishDialog,
+    isShowAiDailyDialog,
+    openAiDailyDialog,
     isShowPdfExportDialog,
     openPdfExportDialog,
     pdfExportOptions,

@@ -74,6 +74,7 @@ declare global {
   const imageUploadCacheKey: typeof import('./src/composables/useImageUploader').imageUploadCacheKey
   const inject: typeof import('vue').inject
   const injectLocal: typeof import('@vueuse/core').injectLocal
+  const isAiDailyAvailable: typeof import('./src/stores/aiDaily').isAiDailyAvailable
   const isBuiltinQuickCommand: typeof import('./src/stores/quickCommands').isBuiltinQuickCommand
   const isDefined: typeof import('@vueuse/core').isDefined
   const isNativePublishAvailable: typeof import('./src/stores/publish').isNativePublishAvailable
@@ -162,6 +163,7 @@ declare global {
   const useAIImageConfigStore: typeof import('./src/stores/aiImageConfig').useAIImageConfigStore
   const useAccountSyncBootstrap: typeof import('./src/composables/useAccountSyncBootstrap').useAccountSyncBootstrap
   const useActiveElement: typeof import('@vueuse/core').useActiveElement
+  const useAiDailyStore: typeof import('./src/stores/aiDaily').useAiDailyStore
   const useAnimate: typeof import('@vueuse/core').useAnimate
   const useArrayDifference: typeof import('@vueuse/core').useArrayDifference
   const useArrayEvery: typeof import('@vueuse/core').useArrayEvery
@@ -394,6 +396,9 @@ declare global {
   // @ts-ignore
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
+  // @ts-ignore
+  export type { AiDailyConnection } from './src/stores/aiDaily'
+  import('./src/stores/aiDaily')
   // @ts-ignore
   export type { CssContentConfig } from './src/stores/cssEditor'
   import('./src/stores/cssEditor')
