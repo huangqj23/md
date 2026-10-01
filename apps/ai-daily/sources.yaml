@@ -4,8 +4,9 @@
 # 可以用 label 覆盖；track 是主线提示（llm / agent / vision），不写就按关键词判断。
 # 2026-09-30 已实测本机可访问的才放进来。
 
-# 时间窗口：收“上次生成之后”的动态，最少 24 小时、最多 72 小时（周末停一天也不会漏）；第一次运行按 26 小时
-window: {default_hours: 26, min_hours: 24, max_hours: 72}
+# 时间窗口：收“上一期之后”的动态：从前一期最后一次生成的时间算起（多留 2 小时），同一天重新生成起点不变；
+# 最少 12 小时、最多 72 小时（周末停一天也不会漏）；第一次运行按 26 小时
+window: {default_hours: 26, min_hours: 12, max_hours: 72}
 
 # 版面：头条 1 条 + 要闻 main 条（平铺，不分栏）+ 快讯 briefs 条；备选进审稿清单；配图最多 max_images 张
 layout: {main: 15, briefs: 10, backup: 20, max_images: 16}
@@ -49,7 +50,9 @@ feeds:
   - {key: arstechnica-ai, name: Ars Technica AI, url: "https://arstechnica.com/ai/feed/", kind: media, max_items: 8}
   - {key: marktechpost, name: MarkTechPost, url: "https://www.marktechpost.com/feed/", kind: media, max_items: 8}
   - {key: mit-tr-ai, name: MIT Technology Review AI, url: "https://www.technologyreview.com/topic/artificial-intelligence/feed", kind: media, max_items: 5}
-  - {key: techmeme, name: Techmeme, url: "https://www.techmeme.com/feed.xml", kind: media, filter_keywords: true, max_items: 8}
+  # Techmeme 的链接是当天整页新闻流，写稿会读到一堆无关条目：follow_original 改用摘要里的原文链接
+  - {key: techmeme, name: Techmeme, url: "https://www.techmeme.com/feed.xml", kind: media, filter_keywords: true, max_items: 8,
+     follow_original: true}
 
   # ---- 视觉 / 具身
   - {key: roboflow-blog, name: Roboflow 博客, url: "https://blog.roboflow.com/rss/", kind: media, track: vision, max_items: 5}

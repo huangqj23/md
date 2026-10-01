@@ -1,4 +1,4 @@
-"""命令行：ai-daily run / collect / publish / llm-status / install-host。"""
+"""命令行：ai-daily run / collect / publish / preview / llm-status / install-host。"""
 import argparse
 import logging
 import sys
@@ -126,6 +126,22 @@ def cmd_llm_status(args, settings, sources) -> int:
     return 0 if ready["ready"] else 1
 
 
+def cmd_preview(args, settings, sources) -> int:
+    from . import preview
+    day = _day(args.date)
+    article = render.paths(settings.daily_dir / f"{day:%Y-%m}", day)["article"]
+    if not article.is_file():
+        print(f"找不到正文：{article}")
+        return 2
+    out = Path(args.out) if args.out else settings.data_dir / "previews" / f"{day.isoformat()}_AI日报预览.html"
+    info = preview.build(article, out, mark=settings.brand_dir / "hollis23-mark.svg")
+    print(f"预览页：{out}（{info['bytes'] // 1024} KB）")
+    print(f"标题：{info['title']}")
+    print(f"头条 1 + 要闻 {info['items']} + 快讯 {info['briefs']}；配图 {info['images']} / {info['items'] + 1}；"
+          f"待核对 {info['flags']} 处；我的看法{'待写' if info['opinion_todo'] else '已写'}")
+    return 0
+
+
 def cmd_install_host(args, settings, sources) -> int:
     from . import host_install
     browsers = list(host_install.REG_KEYS) if args.browser == "all" else [args.browser]
@@ -166,11 +182,14 @@ def main(argv=None) -> int:
     h.add_argument("--browser", choices=["chrome", "edge", "chromium", "all"], default="all")
     sub.add_parser("uninstall-host", help="注销 Native Messaging host")
     sub.add_parser("llm-status", help="查看当前的模型配置（选题 / 写稿用哪家、哪个模型）")
+    v = sub.add_parser("preview", help="把当天的草稿渲染成自带图片的 HTML 预览页")
+    v.add_argument("--date", help="稿件日期，默认今天")
+    v.add_argument("--out", help="输出文件（默认 data/previews/<日期>_AI日报预览.html）")
     args = ap.parse_args(argv)
 
     settings, sources = load_settings(), load_sources()
     _setup_logging(settings.log_dir, _day(getattr(args, "date", None)))
     handler = {"run": cmd_run, "collect": cmd_collect, "publish": cmd_publish,
                "install-host": cmd_install_host, "uninstall-host": cmd_uninstall_host,
-               "llm-status": cmd_llm_status}[args.cmd]
+               "llm-status": cmd_llm_status, "preview": cmd_preview}[args.cmd]
     return handler(args, settings, sources)

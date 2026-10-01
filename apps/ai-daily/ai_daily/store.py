@@ -91,6 +91,22 @@ class Store:
         self.db.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", (key, value))
         self.db.commit()
 
+    def mark_run(self, day: date, when: datetime) -> None:
+        """记下某一期最后一次生成的时间（同一天重新生成会覆盖）。"""
+        self.set_meta(f"last_run:{day.isoformat()}", when.isoformat())
+
+    def previous_run(self, day: date, legacy_key: str | None = None) -> datetime | None:
+        """day 之前最近一期最后一次生成的时间。按日期记录之前的库只有一个全局时间（legacy_key），
+        它早于 day 那天才算数。"""
+        row = self.db.execute("SELECT value FROM meta WHERE key LIKE 'last_run:%' AND key < ? "
+                              "ORDER BY key DESC LIMIT 1", (f"last_run:{day.isoformat()}",)).fetchone()
+        if row:
+            return datetime.fromisoformat(row[0])
+        legacy = self.get_meta(legacy_key) if legacy_key else None
+        if legacy and datetime.fromisoformat(legacy).astimezone().date() < day:
+            return datetime.fromisoformat(legacy)
+        return None
+
     # ---- 快照
     def save_snapshot(self, name: str, day: date, data) -> None:
         self.db.execute("INSERT OR REPLACE INTO snapshots VALUES (?, ?, ?)",

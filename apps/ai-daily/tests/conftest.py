@@ -23,6 +23,15 @@ ARTICLE_HTML = """<html><head><title>t</title><meta property="og:image" content=
 <p>It supports a 1,050,000 token context window and costs $2 per million input tokens.</p>
 <p>Developers can use it today in the API.</p></article></body></html>"""
 
+# Techmeme 的 RSS：条目链接是当天的新闻流页面，摘要里有原文链接和原文网站首页（结构照 2026-10-01 的真实内容）
+TECHMEME_RSS = """<?xml version="1.0"?><rss version="2.0"><channel><title>Techmeme</title>
+<item><title>California Governor Gavin Newsom signs the No Robo Bosses Act</title>
+<link>https://www.techmeme.com/260930/p52#a260930p52</link><pubDate>Wed, 30 Sep 2026 22:10:00 GMT</pubDate>
+<description><![CDATA[<a href="https://www.techmeme.com/260930/p52#a260930p52">Techmeme</a> <a href="http://www.cnbc.com/">CNBC</a>:
+<a href="https://www.cnbc.com/2026/09/30/california-gavin-newsom-ai-ban.html">California Governor Gavin Newsom signs
+the No Robo Bosses Act, which prevents employers from relying solely on AI to fire workers</a>]]></description></item>
+</channel></rss>"""
+
 # 国内大模型公司的官方渠道（结构照 2026-09-30 的真实页面：GitHub API、DeepSeek 文档、Z.ai 发布页）
 ORG_REPOS = {"deepseek-ai": [
     {"full_name": "deepseek-ai/DeepEP-Ascend", "html_url": "https://github.com/deepseek-ai/DeepEP-Ascend",
@@ -82,6 +91,8 @@ def route(request: httpx.Request) -> httpx.Response:
     if host == "api-docs.deepseek.com":
         page = DEEPSEEK_HOME if path == "/" else DEEPSEEK_NEWS.get(path)
         return httpx.Response(200, text=page, headers={"content-type": "text/html"}) if page else httpx.Response(404)
+    if host == "www.techmeme.com" and path == "/feed.xml":
+        return httpx.Response(200, text=TECHMEME_RSS, headers={"content-type": "application/rss+xml"})
     if host == "docs.z.ai":
         return httpx.Response(200, text=ZAI_PAGE, headers={"content-type": "text/html; charset=utf-8"})
     if host == "api.github.com" and path.startswith("/repos/"):

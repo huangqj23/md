@@ -69,6 +69,35 @@ def test_missing_numbers_compares_magnitudes_across_languages():
     assert missing_numbers("拟募资 3000 亿美元，周活 12 亿人", src) == ["3000"]         # 数量级不对照样标出来
 
 
+def test_missing_numbers_reads_english_month_names():
+    src = "Reddit will end RSS support on November 13 and close its public API in 2027."
+    assert missing_numbers("RSS 支持 11 月 13 日终止，公共 API 2027 年关闭", src) == []
+    assert missing_numbers("RSS 支持 12 月 13 日终止", src) == ["12"]                    # 月份对不上照样标出来
+
+
+def test_check_event_accepts_numbers_from_source_titles():
+    from ai_daily.verify import check_event
+    release = Item("gh:huggingface/transformers", "huggingface/transformers", "release",
+                   "huggingface/transformers v5.18.0", "https://github.com/huggingface/transformers/releases/tag/v5.18.0")
+    ev = Event(title="Transformers 5.18", items=[release], track="llm", score=50, label="代码")
+    ev.source_text, ev.paragraphs = "New model: a speaker diarization pipeline.", ["Transformers 5.18 新增说话人分离模型。"]
+    check_event(ev)
+    assert ev.flags == []
+
+
+def test_untranslated_english_paragraph_is_flagged():
+    from ai_daily.verify import check_event, untranslated
+    stray = ("For moderators who have relied on RSS channels for their own alerts, Reddit is now recommending a shift "
+             "to the Discord Relay Devvit app.")
+    mixed = "NVIDIA 发布 NeMo Relay，用于观测 Agent 的模型与工具执行路径：Hermes Agent 已原生集成，把 session、turn 表示为 scope 层级。"
+    assert untranslated(stray) and not untranslated(mixed)
+    ev = Event(title="Reddit", items=[Item("s", "S", "media", "t", "https://e.com/t")], track="other", score=50,
+               label="媒体")
+    ev.source_text, ev.paragraphs = stray, ["Reddit 宣布终止 RSS 支持。", stray]
+    check_event(ev)
+    assert len(ev.flags) == 1 and ev.flags[0].startswith("有一段没翻译成中文（“For moderators")
+
+
 def test_clean_readme_strips_logo_html_and_badges():
     from ai_daily.collect.hf import clean_readme
     md = ('---\nlicense: mit\n---\n<p align="center"> <img src="logo.png" width="400"/> </p>\n'

@@ -29,10 +29,12 @@ collect（官方博客 / 国内大模型公司的官方渠道 / 海外媒体 / n
   - 阿里巴巴官方新闻站 Alizila（RSS）。
   - Qwen 官网、StepFun、MiniMax、Kimi 的新闻页是前端渲染或没有日期，抓不到；它们的发布靠 GitHub、HF、X 线索（AINews）和国外媒体覆盖。
 - **X**：不付费、不抓登录接口；X 上的动态来自 AINews 的回顾和手动投喂。
+- **聚合站只当发现渠道**：Techmeme、TLDR、Hacker News 的条目链接指向原文，信源名写原文网站（抓原文时换成网站名），聚合站记在 `via`。Techmeme 自己的链接是当天整页新闻流，不能拿来写稿。
+- **OpenRouter 的标价变化**是第三方平台的列表价（常因默认供应商变化而变），不当作厂商调价报道，最多进快讯。
 
 ## 只收新动态
 
-- **时间窗口**：从上次生成的时间算起（多留 2 小时防漏），至少 24 小时、最多 72 小时；第一次运行取 26 小时。同一天重新生成照样收全天的。
+- **时间窗口**：从上一期（更早日期）最后一次生成的时间算起，多留 2 小时防漏，至少 12 小时、最多 72 小时；第一次运行取 26 小时。同一天重新生成起点不变，窗口不会越跑越短，也不会把上一期窗口里没选上的条目再捞回来。
 - **旧闻识别**：选题时把“窗口开始前已经出现过的动态”（以前的运行采集到的）一起给模型，媒体今天才转述的旧消息不选；所有来源都早于窗口的事件由程序直接丢掉。
 - **不重复**：前几天草稿里写过的链接不再选，标题交给选题判断“是不是后续”，没走 `publish` 也算。
 - **榜单类信源**：HF 热门模型只收 72 小时内上传的；GitHub 热榜只收一年内创建的项目（创建时间用 GitHub API 查，查过的存进数据库；未认证每小时 60 次，在 `.env` 里设 `GITHUB_TOKEN` 可提高到 5000 次）。
@@ -65,11 +67,22 @@ copy .env.example .env      # vault 路径等；模型和 key 推荐在浏览器
 .venv\Scripts\ai-daily collect --show 20          # 只看各信源采到多少条（不记录条目）
 .venv\Scripts\ai-daily run --no-llm --out D:\tmp  # 不花钱试跑：启发式选题、原文节选，单独的试跑库
 .venv\Scripts\ai-daily run                        # 正式运行，写到 vault；当天重新生成加 --force（旧稿备份成 .bak）
+.venv\Scripts\ai-daily preview                    # 把当天草稿渲染成自带图片的 HTML 预览页（data/previews/）
 .venv\Scripts\ai-daily publish                    # 审完稿后：检查 → 内嵌版 → 记录已发链接
 powershell -ExecutionPolicy Bypass -File scripts\install_task.ps1   # 每天 07:00 自动运行（先配好模型）
 ```
 
 白天看到的链接贴进 `<vault>/AI_Daily/_inbox.md`（每行一个，可带备注），下次运行会收录；推文用 X 的 oEmbed 免费取正文。
+
+## 让 Claude Code 直接生成
+
+在 vault（`D:\Obisidian`）里打开 Claude Code，说“生成今天的 AI 早报”，或者输入 `/ai-daily`（可以带日期）。流程写在 vault 的 `.claude/skills/ai-daily/SKILL.md` 里：
+
+1. 先检查模型配置、草稿有没有被改过、GitHub API 额度；
+2. 用命令行生成；
+3. 检查国内媒体、旧闻、主来源、标题、【待核对】和配图；
+4. 用 `ai-daily preview` 生成预览页，发成只有你能看的 Artifact 页面；
+5. 汇报还要你做的事：写“我的看法”、处理【待核对】、选标题。
 
 ## 浏览器面板（md 扩展里的“AI 早报”）
 

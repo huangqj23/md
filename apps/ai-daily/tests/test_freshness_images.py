@@ -1,6 +1,6 @@
 """2026-10 调整：只收新动态（窗口、旧闻过滤）、更多配图（候选顺序、去重、Referer）、截断后提高 token 上限。"""
 import json
-from datetime import timedelta
+from datetime import date, timedelta
 
 import httpx
 import httpx2
@@ -14,17 +14,27 @@ from ai_daily.triage import Layout, drop_stale
 from conftest import NOW, png_bytes
 
 
-def test_window_starts_at_last_run_with_bounds(tmp_path):
+def test_window_starts_where_the_previous_issue_left_off(tmp_path):
+    cfg = {"window": {"default_hours": 26, "min_hours": 12, "max_hours": 72}}
+    day, yesterday = date(2026, 9, 30), date(2026, 9, 29)
     store = Store(tmp_path / "db")
-    cfg = {"window": {"default_hours": 26, "min_hours": 24, "max_hours": 72}}
-    assert pipeline.window_start(store, cfg, NOW) == NOW - timedelta(hours=26)        # 第一次运行
-    store.set_meta(pipeline.LAST_RUN, (NOW - timedelta(hours=40)).isoformat())
-    assert pipeline.window_start(store, cfg, NOW) == NOW - timedelta(hours=42)        # 上次之后 + 2 小时余量
-    store.set_meta(pipeline.LAST_RUN, (NOW - timedelta(hours=3)).isoformat())
-    assert pipeline.window_start(store, cfg, NOW) == NOW - timedelta(hours=24)        # 同一天重跑：至少 24 小时
-    store.set_meta(pipeline.LAST_RUN, (NOW - timedelta(days=9)).isoformat())
-    assert pipeline.window_start(store, cfg, NOW) == NOW - timedelta(hours=72)        # 停了很久：最多 72 小时
+    assert pipeline.window_start(store, cfg, NOW, day) == NOW - timedelta(hours=26)       # 第一次运行
+    store.mark_run(yesterday, NOW - timedelta(hours=16))
+    assert pipeline.window_start(store, cfg, NOW, day) == NOW - timedelta(hours=18)       # 上一期之后 + 2 小时余量
+    store.mark_run(day, NOW - timedelta(hours=1))
+    assert pipeline.window_start(store, cfg, NOW, day) == NOW - timedelta(hours=18)       # 同一天重跑：起点不变
+    store.mark_run(yesterday, NOW - timedelta(hours=5))
+    assert pipeline.window_start(store, cfg, NOW, day) == NOW - timedelta(hours=12)       # 两期挨得近：至少 12 小时
+    store.mark_run(yesterday, NOW - timedelta(days=9))
+    assert pipeline.window_start(store, cfg, NOW, day) == NOW - timedelta(hours=72)       # 停了很久：最多 72 小时
     store.close()
+
+    legacy = Store(tmp_path / "legacy")                 # 按日期记录之前的库：只有一个全局时间
+    legacy.set_meta(pipeline.LAST_RUN, (NOW - timedelta(hours=20)).isoformat())
+    assert pipeline.window_start(legacy, cfg, NOW, day) == NOW - timedelta(hours=22)
+    legacy.set_meta(pipeline.LAST_RUN, (NOW - timedelta(hours=1)).isoformat())   # 那是今天这一期自己的
+    assert pipeline.window_start(legacy, cfg, NOW, day) == NOW - timedelta(hours=26)
+    legacy.close()
 
 
 def _item(title, kind="official", published=None, **kw):

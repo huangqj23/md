@@ -57,8 +57,11 @@ def diff(current: dict, previous: dict | None, since: datetime) -> list[Item]:
         if old.get("context") and m.get("context") and old["context"] != m["context"]:
             changes.append(f"上下文 {old['context']} → {m['context']}")
         if changes:
+            # OpenRouter 的列表价常因默认供应商变化而变（同一天输入降、输出涨也常见），不等于厂商官方调价
             text = "；".join(changes)
+            note = "OpenRouter 列表价变化，可能是默认供应商变了，不一定是厂商官方调价"
             items.append(Item(source="openrouter", source_name="OpenRouter", kind="price",
-                              title=f"OpenRouter 调整 {m['name']}：{text}", url=url, summary=text,
-                              meta={"openrouter": m, "text": f"{m['name']}（{mid}）：{text}"}))
+                              title=f"OpenRouter 上 {m['name']} 的标价变化：{text}", url=url,
+                              summary=f"{text}（{note}）",
+                              meta={"openrouter": m, "text": f"{m['name']}（{mid}）：{text}。{note}。"}))
     return items

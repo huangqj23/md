@@ -60,15 +60,31 @@ def collect_feed(http, spec: dict, since: datetime, keywords=(), official_handle
             continue
         if spec["kind"] == "release":
             title = f"{spec['name']} {title}"
-        items.append(Item(source=spec["key"], source_name=spec["name"], kind=spec["kind"], title=title,
-                          url=e.get("link", ""), published=when, summary=clip(text, 500),
+        url, name, meta = e.get("link", ""), spec["name"], {"text": clip(text, 8000)}
+        original = _original_link(_entry_html(e), url) if spec.get("follow_original") else None
+        if original:          # 聚合站（Techmeme）只当发现渠道：链接和信源名换成原文，抓原文时再换成网站名
+            url, name = original, _lead_name(original, spec["name"])
+            meta.update(via=spec["name"], via_url=e.get("link", ""))
+        items.append(Item(source=spec["key"], source_name=name, kind=spec["kind"], title=title,
+                          url=url, published=when, summary=clip(text, 500),
                           image=_entry_image(e), track=spec.get("track"), label=spec.get("label"),
-                          meta={"text": clip(text, 8000)}))
+                          meta=meta))
     if spec.get("parser") not in ("ainews", "tldr"):
         items.sort(key=lambda it: it.published, reverse=True)
     if spec.get("latest_only"):
         items = items[:1]
     return items[: spec.get("max_items", 20)]
+
+
+def _original_link(html: str, own: str) -> str | None:
+    """聚合站条目摘要里第一条指向别的网站文章的链接（跳过聚合站自己的链接和只有域名的首页链接）。"""
+    own_host = (urlsplit(own).hostname or "").removeprefix("www.")
+    for a in BeautifulSoup(html or "", "lxml").find_all("a", href=True):
+        parts = urlsplit(a["href"])
+        if parts.scheme in ("http", "https") and (parts.hostname or "").removeprefix("www.") != own_host \
+                and parts.path.strip("/"):
+            return a["href"]
+    return None
 
 
 def _lead_name(url: str, fallback: str) -> str:

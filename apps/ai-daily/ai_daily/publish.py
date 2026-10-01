@@ -10,7 +10,6 @@ import httpx
 from .render import FLAG_MARK
 
 PLACEHOLDER = "【我的看法：待写】"
-AI_NOTE = "由 AI 辅助"
 WECHAT_TITLE_MAX = 64
 H1 = re.compile(r"^#\s+(.+?)\s*$", re.M)
 LINK = re.compile(r"(?<!!)\[([^\]]*)\]\((https?://[^)\s]+)\)")
@@ -25,8 +24,6 @@ def check(article: Path) -> list[str]:
         problems.append("头条的“我的看法”还没写（替换【我的看法：待写】）")
     if (n := text.count(FLAG_MARK)) > 0:
         problems.append(f"还有 {n} 处【待核对】没处理：核对原文、改好正文后删掉标记")
-    if AI_NOTE not in text:
-        problems.append("文末缺少 AI 辅助声明")
     m = H1.search(text)
     if not m:
         problems.append("缺少一级标题（md 会把第一个一级标题当作发布标题）")
@@ -63,12 +60,13 @@ def run_watermark(brand_python: str, script: Path, article: Path) -> tuple[bool,
 
 
 TITLE_LINES = re.compile(r"^(?:##\s+头条｜(.+)|###\s+\d+\.\s+(.+)|-\s+\*\*(.+?)\*\*：)", re.M)
+NOT_TITLES = {"工程师视角", "显存估算"}          # 要闻条目里的固定小标题，不是条目标题
 
 
 def article_refs(text: str) -> tuple[list[str], list[str]]:
     """正文里的链接和条目标题（头条、要闻、快讯）。"""
     titles = [next(g for g in m.groups() if g).strip() for m in TITLE_LINES.finditer(text)]
-    return [url for _, url in LINK.findall(text)], titles
+    return [url for _, url in LINK.findall(text)], [t for t in titles if t not in NOT_TITLES]
 
 
 def mark_published(store, day: date, article: Path) -> int:

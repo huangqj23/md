@@ -87,7 +87,8 @@ def test_full_run_with_llm(http, settings):
     assert result.article == settings.daily_dir / "2026-09" / "2026-09-30_AI日报.md"
     assert md.startswith("# AI 早报 09.30｜GPT-6.1 Sol 价格降到五分之一\n")
     assert "> 1. 看点一" in md and "## 头条｜中文标题" in md
-    assert "【我的看法：待写】" in md and "由 AI 辅助" in md
+    assert "【我的看法：待写】" in md and "图片版权归原作者，出处见图注。" in md
+    assert "由 AI 辅助" not in md                                # 文末不写 AI 辅助声明（用户 2026-10-01 定的）
     assert "## 要闻" in md and "## 快讯" in md and "## LLM" not in md          # 不分栏，平铺
     numbers = [int(n) for n in re.findall(r"^### (\d+)\. ", md, re.M)]
     assert numbers == list(range(1, 11))                        # 要闻 10 条，连续编号
@@ -154,7 +155,9 @@ def test_publish_check_then_mark_published(http, settings):
     n = publish.mark_published(store, DAY, result.article)
     assert n > 5 and store.has_published(DAY)
     assert "https://openai.com/index/introducing-gpt-6-1-sol" in store.published_urls(date(2026, 10, 1))
-    assert any("中文标题" in t for t in store.recent_titles(date(2026, 10, 1)))
+    recent = store.recent_titles(date(2026, 10, 1))
+    assert any("中文标题" in t for t in recent)
+    assert not any(t.endswith(("工程师视角", "显存估算")) for t in recent)     # 条目里的固定小标题不算标题
     store.close()
 
 
@@ -192,3 +195,44 @@ def test_issue_number_counts_earlier_days(tmp_path):
         (tmp_path / "2026-09" / f"{d}_AI日报.md").write_text("x", encoding="utf-8")
     (tmp_path / "2026-09" / "2026-09-29_AI日报_内嵌图片版.md").write_text("x", encoding="utf-8")
     assert render.issue_number(tmp_path, date(2026, 9, 30)) == 3
+
+
+def test_preview_page_embeds_images_and_shows_draft_status(http, settings, tmp_path):
+    from html.parser import HTMLParser
+
+    from ai_daily import preview
+    result = run(settings, SOURCES, day=DAY, now=NOW, http=http, llm=scripted(), cover=False)
+    out = tmp_path / "preview.html"
+    info = preview.build(result.article, out)
+    page = out.read_text(encoding="utf-8")
+    briefs = result.article.read_text(encoding="utf-8").split("## 快讯", 1)[1].split("---", 1)[0]
+    assert info["items"] == 10 and info["briefs"] == len(re.findall(r"^- ", briefs, re.M)) >= 4
+    assert info["flags"] == 1 and info["opinion_todo"]
+    assert page.startswith("<title>AI 早报 09.30</title>")
+    assert page.count("data:image/webp;base64,") == info["images"] >= 9      # 图片全部内嵌，不引用本地文件
+    assert 'src="images/' not in page
+    assert '<li class="used">AI 早报 09.30｜GPT-6.1 Sol 价格降到五分之一</li>' in page   # 候选标题里标出正文在用的
+    assert '<span class="cred official">官方</span>' in page and 'class="flag"' in page
+
+    class Balance(HTMLParser):
+        VOID = {"img", "meta", "link", "br", "hr", "rect", "path"}
+
+        def __init__(self):
+            super().__init__()
+            self.stack, self.bad = [], []
+
+        def handle_starttag(self, tag, attrs):
+            if tag not in self.VOID:
+                self.stack.append(tag)
+
+        def handle_endtag(self, tag):
+            if tag in self.VOID:
+                return
+            if self.stack and self.stack[-1] == tag:
+                self.stack.pop()
+            else:
+                self.bad.append(tag)
+
+    checker = Balance()
+    checker.feed(page)
+    assert checker.stack == [] and checker.bad == []                        # 标签成对，结构没乱

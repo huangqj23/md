@@ -24,7 +24,8 @@ from .net import get
 from .textutil import clip
 
 log = logging.getLogger(__name__)
-PAGE_KINDS = {"official", "media", "newsletter", "community", "inbox", "repo"}
+# 主来源是这些类型时打开网页抓正文和配图（GitHub release 页、OpenRouter 模型页也有自己的分享卡片）
+PAGE_KINDS = {"official", "media", "newsletter", "community", "inbox", "repo", "release", "price"}
 MAX_SOURCE_CHARS = 12000     # 单条原文上限（给写作 prompt 用，约 3–4k token）
 MAX_EXTRA_PAGES = 2          # 每个事件为找配图额外打开的网页数
 SHORT_SOURCE_CHARS = 1500    # 主来源正文短于这个长度时，附上其他来源的正文
@@ -178,7 +179,8 @@ def _other_sources(http, ev: Event, primary: Item, cands: _Candidates) -> list[t
         cands.add(3, other.image, other)
         if other.kind in ("social", "inbox"):
             _tweet_images(http, other, cands, 3)
-        if other.kind in PAGE_KINDS and other.kind != "repo" and pages < MAX_EXTRA_PAGES:
+        # 仓库、release、OpenRouter 页的图是通用卡片，额外打开的名额留给文章页
+        if other.kind in PAGE_KINDS and other.kind not in ("repo", "release", "price") and pages < MAX_EXTRA_PAGES:
             pages += 1
             try:
                 body, images, site = fetch_page(http, other.url)

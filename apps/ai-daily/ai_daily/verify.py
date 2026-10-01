@@ -46,21 +46,46 @@ def _value(num: str, unit: str) -> Decimal:
     return Decimal(num.replace(",", "")).scaleb(_EXP[unit]).normalize()
 
 
+_MONTHS = ("january|jan", "february|feb", "march|mar", "april|apr", "may", "june|jun", "july|jul",
+           "august|aug", "september|sept|sep", "october|oct", "november|nov", "december|dec")
+
+
+def _month_in(source: str, n: str) -> bool:
+    """中文写“11 月”、英文原文写 November / Nov。"""
+    return n.isdigit() and 1 <= int(n) <= 12 and re.search(rf"\b(?:{_MONTHS[int(n) - 1]})\b", source) is not None
+
+
 def missing_numbers(text: str, source: str) -> list[str]:
-    """正文里的数字（两位以上或带小数，年份除外）在原文里找不到的。带数量级的（亿、billion 等）按数值比。"""
+    """正文里的数字（两位以上或带小数，年份除外）在原文里找不到的。带数量级的（亿、billion 等）按数值比，
+    “11 月”这样的月份对原文里的英文月份名。"""
     src = normalize(source).replace(",", "")
     src_values = {_value(n, u) for n, u in _NUM.findall(normalize(source)) if u}
+    norm = normalize(text)
     out = set()
-    for n, unit in _NUM.findall(normalize(text)):
+    for m in _NUM.finditer(norm):
+        n, unit = m.groups()
         bare = n.replace(",", "")
         if len(bare.replace(".", "")) < 2 or re.fullmatch(r"(19|20)\d\d", bare):
             continue
-        if bare not in src and not (unit and _value(n, unit) in src_values):
-            out.add(n)
+        if bare in src or (unit and _value(n, unit) in src_values):
+            continue
+        if norm[m.end():].lstrip().startswith("月") and _month_in(src, bare):
+            continue
+        out.add(n)
     return sorted(out)
 
 
+def untranslated(paragraph: str) -> bool:
+    """写稿偶尔把原文的英文句子原样当成一段：字母里汉字不到一成就算（中英混排的正常段落在三成左右）。"""
+    letters = [c for c in paragraph if c.isalpha()]
+    cjk = sum(1 for c in letters if "一" <= c <= "鿿")
+    return len(letters) >= 40 and cjk / len(letters) < 0.1
+
+
 def check_event(ev: Event) -> None:
+    for p in ev.paragraphs:
+        if untranslated(p):
+            ev.flags.append(f"有一段没翻译成中文（“{clip(p, 30)}”），改写或删掉")
     body = " ".join(ev.paragraphs + ([ev.engineer_note] if ev.engineer_note else []))
     verified = [q for q in ev.quotes if quote_found(str(q.get("source_quote", "")), ev.source_text)]
     if len(verified) < len(ev.quotes):
@@ -68,6 +93,7 @@ def check_event(ev: Event) -> None:
     for q in verified:          # 原文句里的换行会把 Markdown 引用块截断
         q["source_quote"] = clip(" ".join(str(q["source_quote"]).split()), 200)
     ev.quotes = verified
-    missing = missing_numbers(body, f"{ev.source_text} {ev.vram}")
+    titles = " ".join(it.title for it in ev.items)              # 版本号常常只在标题里（v5.18.0）
+    missing = missing_numbers(body, f"{ev.source_text} {ev.vram} {titles}")
     if missing:
         ev.flags.append("这些数字在原文里没找到：" + "、".join(missing[:8]))

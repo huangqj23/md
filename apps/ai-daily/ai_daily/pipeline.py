@@ -20,7 +20,7 @@ from .store import Store
 from .write import write_all
 
 log = logging.getLogger(__name__)
-LAST_RUN = "last_run"
+LAST_RUN = "last_run"          # 2026-09-30 以前只记一个全局时间；现在按日期记（Store.mark_run）
 HEAT_KEYS = ("points", "upvotes", "likes", "stars_today")
 
 
@@ -57,14 +57,16 @@ def ensure_inbox(path: Path) -> None:
         path.write_text(INBOX_HEADER, encoding="utf-8")
 
 
-def window_start(store: Store, sources: dict, now: datetime) -> datetime:
-    """收“上次生成之后”的动态，夹在 [min_hours, max_hours] 之间；第一次运行用 default_hours。"""
+def window_start(store: Store, sources: dict, now: datetime, day: date) -> datetime:
+    """收“上一期之后”的动态：从前一期（更早日期）最后一次生成的时间算起，多留 2 小时防止接缝处漏条，
+    夹在 [min_hours, max_hours] 之间。同一天重新生成用的是同一个起点，窗口不会越跑越短，
+    也不会把上一期窗口里没选上的旧条目再捞回来。第一次运行用 default_hours。"""
     cfg = sources.get("window") or {}
-    lo, hi = cfg.get("min_hours", 24), cfg.get("max_hours", 72)
+    lo, hi = cfg.get("min_hours", 12), cfg.get("max_hours", 72)
     hours = cfg.get("default_hours", sources.get("window_hours", 26))
-    last = store.get_meta(LAST_RUN)
-    if last:
-        hours = (now - datetime.fromisoformat(last)).total_seconds() / 3600 + 2   # 多留 2 小时防止接缝处漏条
+    prev = store.previous_run(day, legacy_key=LAST_RUN)
+    if prev:
+        hours = (now - prev).total_seconds() / 3600 + 2
     return now - timedelta(hours=min(max(hours, lo), hi))
 
 
@@ -119,7 +121,7 @@ def run(settings: Settings, sources: dict, *, day: date, now: datetime, http, ll
     store = Store(db_path or settings.db_path)
     try:
         ensure_inbox(settings.inbox)
-        since = window_start(store, sources, now)
+        since = window_start(store, sources, now, day)
         before = store.seen_before(since)            # 以前的运行见过、发布在窗口前的：给选题识别旧闻
         known_repos = store.repo_created()
         items, stats, snap = collect_all(http, sources, now=now, since=since, inbox_path=settings.inbox,
@@ -169,7 +171,7 @@ def run(settings: Settings, sources: dict, *, day: date, now: datetime, http, ll
         spec = render.cover_spec(day, render.issue_number(settings.daily_dir, day), layout, editor)
         render.write_json(p["cover"], spec)
         cover_ok = run_cover(settings, p["cover"]) if cover else False
-        store.set_meta(LAST_RUN, now.isoformat())
+        store.mark_run(day, now)
         return RunResult(p["article"], p["review"], p["cover"], cover_ok, article_md.count(render.FLAG_MARK))
     finally:
         store.close()

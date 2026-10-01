@@ -93,8 +93,9 @@ def test_openrouter_diff_new_and_price_change(http):
     items = openrouter.diff(snap, prev, SINCE)
     titles = [it.title for it in items]
     assert any(t.startswith("OpenRouter 上架") and "gpt-6.1-sol-pro" in it.url for t, it in zip(titles, items))
-    change = next(it for it in items if it.title.startswith("OpenRouter 调整"))
+    change = next(it for it in items if "标价变化" in it.title)
     assert "claude-sonnet-5.5" in change.url and "输入" in change.summary and "→" in change.summary
+    assert "不一定是厂商官方调价" in change.summary          # 别让写稿写成“X 降价”
     assert len(items) == 2
 
 
@@ -213,3 +214,14 @@ def test_zai_releases_one_item_per_dated_block(http):
     it = items[0]
     assert it.url == "https://docs.z.ai/guides/llm/glm-5.4" and "320B total parameters" in it.summary
     assert it.published == NOW                                    # 当天发布的不晚于现在
+
+
+def test_aggregator_items_point_at_the_original_article(http):
+    spec = {"key": "techmeme", "name": "Techmeme", "url": "https://www.techmeme.com/feed.xml", "kind": "media",
+            "follow_original": True}
+    [it] = feeds.collect_feed(http, spec, SINCE)
+    assert it.url == "https://www.cnbc.com/2026/09/30/california-gavin-newsom-ai-ban.html"   # 不是当天整页新闻流
+    assert it.source_name == "cnbc.com" and it.meta["via"] == "Techmeme"
+    assert it.meta["via_url"] == "https://www.techmeme.com/260930/p52#a260930p52"
+    [plain] = feeds.collect_feed(http, {**spec, "follow_original": False}, SINCE)
+    assert plain.url.startswith("https://www.techmeme.com/") and plain.source_name == "Techmeme"
