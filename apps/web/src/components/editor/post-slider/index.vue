@@ -260,6 +260,7 @@ function renderHistoryContent(content: string): string {
       footnoteTitle: t(`store.render.footnoteTitle`),
       unknownComponent: t(`store.render.unknownComponent`),
       katexLoading: t(`store.render.katexLoading`),
+      tableScrollHint: t(`store.render.tableScrollHint`),
     },
   })
 

@@ -57,6 +57,7 @@ export const useRenderStore = defineStore(`render`, () => {
     footnoteTitle: t(`store.render.footnoteTitle`),
     unknownComponent: t(`store.render.unknownComponent`),
     katexLoading: t(`store.render.katexLoading`),
+    tableScrollHint: t(`store.render.tableScrollHint`),
   })
 
   function buildComponentFingerprint(
@@ -94,6 +95,7 @@ export const useRenderStore = defineStore(`render`, () => {
       t(`store.render.footnoteTitle`),
       t(`store.render.unknownComponent`),
       t(`store.render.katexLoading`),
+      t(`store.render.tableScrollHint`),
       t(`store.diagram.mermaidLoading`),
     ].join(`\u0001`)
   }

@@ -109,6 +109,7 @@ export default {
       footnoteTitle: `References`,
       unknownComponent: `Unknown component: {name}`,
       katexLoading: `Loading formula…`,
+      tableScrollHint: `Swipe to see the full table →`,
       renderFailed: `Render failed`,
     },
     popup: {

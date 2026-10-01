@@ -46,6 +46,40 @@ const MP_WEIXIN_LINK_REGEX = /^https?:\/\/mp\.weixin\.qq\.com/
 /** Locale-neutral English fallbacks; Web injects localized strings via IOpts. */
 const DEFAULT_COUNT_SUMMARY = `{words} words, about {minutes} min read`
 const DEFAULT_FOOTNOTE_TITLE = `References`
+const DEFAULT_TABLE_SCROLL_HINT = `Swipe to see the full table →`
+
+// Tables that scroll sideways in WeChat articles. WeChat can't drag a table itself (it also strips
+// overflow-x from some elements such as <pre>); what scrolls is overflow-x on a wrapping <section>,
+// the same pattern the slider and code blocks use. Cells keep their natural width: short cells don't
+// wrap, long text cells get a minimum width and wrap inside it, so columns never shrink to a character
+// or two. When the table is wider than a phone screen the wrapper scrolls and a hint is shown below.
+/** Characters a phone renders about 1em wide: CJK scripts and full-width punctuation */
+const TABLE_CJK_REGEX = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}，。、；：？！（）【】《》「」『』“”‘’…—～]/u
+/** Cells with at most this many characters stay on one line (text with CJK / ASCII-only text) */
+const TABLE_SHORT_CJK = 12
+const TABLE_SHORT_ASCII = 20
+/** Minimum width of a long text cell, in em */
+const TABLE_LONG_CELL_EM = 12
+/** Show the swipe hint when the estimated width exceeds this many em (WeChat phone body ≈ 343px at 16px) */
+const TABLE_SCROLL_HINT_EM = 21
+
+interface TableCellLayout { style: string, inner: string, widthEm: number }
+
+export function layoutTableCell(content: string, align: string): TableCellLayout {
+  const text = stripInlineHtml(content).trim()
+  const chars = [...text]
+  const isCjk = TABLE_CJK_REGEX.test(text)
+  const padding = 1 // 0.5em on each side in the themes
+  if (chars.length <= (isCjk ? TABLE_SHORT_CJK : TABLE_SHORT_ASCII)) {
+    const widthEm = chars.reduce((w, ch) => w + (TABLE_CJK_REGEX.test(ch) ? 1 : 0.55), 0)
+    return { style: `text-align: ${align}; white-space: nowrap`, inner: content, widthEm: widthEm + padding }
+  }
+  return {
+    style: `text-align: ${align}; word-break: normal; overflow-wrap: anywhere`,
+    inner: `<section style="min-width: ${TABLE_LONG_CELL_EM}em; white-space: normal">${content}</section>`,
+    widthEm: TABLE_LONG_CELL_EM + padding,
+  }
+}
 
 const ADDITION_STYLE = `
     <style>
@@ -421,33 +455,34 @@ export function initRenderer(opts: IOpts = {}): RendererAPI {
     },
 
     table({ header, rows }: Tokens.Table): string {
-      const headerRow = header
-        .map((cell) => {
-          const text = this.parser.parseInline(cell.tokens)
-          return styledContent(`th`, text, undefined, `text-align: ${cell.align || `left`}`)
-        })
-        .join(``)
+      const colWidths: number[] = []
+      const cell = (tag: `th` | `td`, token: Tokens.TableCell, col: number) => {
+        const { style, inner, widthEm } = layoutTableCell(this.parser.parseInline(token.tokens), token.align || `left`)
+        colWidths[col] = Math.max(colWidths[col] ?? 0, widthEm)
+        return styledContent(tag, inner, undefined, style)
+      }
+      const headerRow = header.map((token, col) => cell(`th`, token, col)).join(``)
       const body = rows
-        .map((row) => {
-          const rowContent = row
-            .map(cell => this.tablecell(cell))
-            .join(``)
-          return styledContent(`tr`, rowContent)
-        })
+        .map(row => styledContent(`tr`, row.map((token, col) => cell(`td`, token, col)).join(``)))
         .join(``)
+      const isWide = colWidths.reduce((sum, w) => sum + w, 0) > TABLE_SCROLL_HINT_EM
+      const hintText = opts.renderMessages?.tableScrollHint || DEFAULT_TABLE_SCROLL_HINT
+      const hint = isWide
+        ? `<p class="table-scroll-hint" style="margin: 4px 0 0; font-size: 12px; line-height: 1.5; color: #999; text-align: right">${hintText}</p>`
+        : ``
       return `
-        <section style="max-width: 100%; overflow: auto; -webkit-overflow-scrolling: touch">
+        <section style="max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch">
           <table class="preview-table">
             <thead>${headerRow}</thead>
             <tbody>${body}</tbody>
           </table>
-        </section>
+        </section>${hint}
       `
     },
 
     tablecell(token: Tokens.TableCell): string {
-      const text = this.parser.parseInline(token.tokens)
-      return styledContent(`td`, text, undefined, `text-align: ${token.align || `left`}`)
+      const { style, inner } = layoutTableCell(this.parser.parseInline(token.tokens), token.align || `left`)
+      return styledContent(`td`, inner, undefined, style)
     },
 
     hr(token: Tokens.Hr): string {

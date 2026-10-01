@@ -109,6 +109,7 @@ export default {
       footnoteTitle: `参考文献`,
       unknownComponent: `不明なコンポーネント: {name}`,
       katexLoading: `数式を読み込み中…`,
+      tableScrollHint: `表は横にスワイプして確認できます →`,
       renderFailed: `レンダリングに失敗しました`,
     },
     popup: {

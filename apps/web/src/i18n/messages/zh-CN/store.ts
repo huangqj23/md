@@ -109,6 +109,7 @@ export default {
       footnoteTitle: `引用链接`,
       unknownComponent: `未知组件: {name}`,
       katexLoading: `正在加载公式…`,
+      tableScrollHint: `表格较宽，可左右滑动查看 →`,
       renderFailed: `渲染失败`,
     },
     popup: {

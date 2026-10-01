@@ -28,6 +28,8 @@ export interface RenderMessages {
   unknownComponent: string
   /** Block math loading placeholder */
   katexLoading: string
+  /** Hint under tables wider than a phone screen (the table scrolls sideways) */
+  tableScrollHint?: string
 }
 
 export interface IOpts {

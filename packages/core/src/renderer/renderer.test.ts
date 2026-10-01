@@ -155,3 +155,42 @@ $$ITE_{i}=Y_{i,1}-Y_{i,0} \\tag{1}$$`
     expect(html).not.toContain(`about:blank`)
   })
 })
+
+describe('tables (scroll sideways in WeChat)', () => {
+  const wide = [
+    `| 方法 | SoccerNet 2022 HOTA / IDF1 / MOTA | MOT17 HOTA / IDF1 / MOTA | 说明 |`,
+    `| --- | --- | ---: | --- |`,
+    `| McByte | 85.0 / 79.9 / 96.8 | 64.2 / 79.4 / 80.2 | 不训练，只用现成的检测器和分割模型做关联，参数在所有数据集上固定 |`,
+  ].join(`\n`)
+
+  it('scrolls on the wrapping section with overflow-x, not the overflow shorthand', () => {
+    const { html } = renderMarkdown(wide, initRenderer({}))
+
+    expect(html).toContain(`overflow-x: auto; -webkit-overflow-scrolling: touch`)
+    expect(html).not.toContain(`overflow: auto`)
+  })
+
+  it('keeps short cells on one line and gives long cells a minimum width', () => {
+    const { html } = renderMarkdown(wide, initRenderer({}))
+
+    expect(html).toContain(`<td class="td" style="text-align: left; white-space: nowrap">McByte</td>`)
+    expect(html).toContain(`<td class="td" style="text-align: right; white-space: nowrap">64.2 / 79.4 / 80.2</td>`)
+    expect(html).toMatch(/<td class="td" style="text-align: left; word-break: normal; overflow-wrap: anywhere"><section style="min-width: 12em; white-space: normal">不训练/)
+    // headers follow the same rule: a 33-character header wraps inside its minimum width
+    expect(html).toMatch(/<th class="th" style="[^"]*word-break: normal[^"]*"><section style="min-width: 12em/)
+  })
+
+  it('shows the swipe hint only when the table is wider than a phone screen', () => {
+    const renderer = initRenderer({
+      renderMessages: { footnoteTitle: ``, unknownComponent: ``, katexLoading: ``, tableScrollHint: `可左右滑动` },
+    })
+    expect(renderMarkdown(wide, renderer).html).toContain(`>可左右滑动</p>`)
+
+    const narrow = `| 模型 | 参数 |\n| --- | --- |\n| LLaMA | 7B |`
+    expect(renderMarkdown(narrow, renderer).html).not.toContain(`table-scroll-hint`)
+  })
+
+  it('falls back to the English hint without injected messages', () => {
+    expect(renderMarkdown(wide, initRenderer({})).html).toContain(`Swipe to see the full table →`)
+  })
+})
