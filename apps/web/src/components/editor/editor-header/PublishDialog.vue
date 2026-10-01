@@ -114,6 +114,8 @@ function errorMessage(code?: RunErrorCode): string {
       return t(`publish.errors.fillFailed`)
     case `page-timeout`:
       return t(`publish.errors.pageTimeout`)
+    case `page-error`:
+      return t(`publish.errors.pageError`)
     case `agent-timeout`:
       return t(`publish.errors.agentTimeout`)
     default:

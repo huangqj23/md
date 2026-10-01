@@ -84,6 +84,7 @@ export interface PublishTabsApi {
   openTab: (url: string, openerTabId: number | null) => Promise<number>
   getTab: (tabId: number) => Promise<TabSnapshot | null>
   navigate: (tabId: number, url: string) => Promise<void>
+  reloadTab: (tabId: number) => Promise<void>
   focusTab: (tabId: number) => Promise<void>
   injectAgent: (tabId: number) => Promise<void>
   runAgent: (tabId: number, request: AgentRequest) => Promise<AgentResult | undefined>
@@ -133,6 +134,9 @@ export function createPublishTabsApi(ext: ExtensionGlobal): PublishTabsApi {
       // A hash-only change does not reload; the platform must boot on the new route.
       if (current.url && current.url !== url && withoutHash(current.url) === withoutHash(url))
         await tabs().reload(tabId)
+    },
+    async reloadTab(tabId) {
+      await tabs().reload(tabId)
     },
     async focusTab(tabId) {
       await tabs().update(tabId, { active: true })

@@ -73,6 +73,7 @@ export default {
       editorNotFound: `没找到编辑器，平台页面可能改版了`,
       fillFailed: `内容没能填进编辑器`,
       pageTimeout: `页面加载超时`,
+      pageError: `页面没有打开（已自动刷新重试一次），多半是网络或代理问题；在该标签页刷新能打开后再同步`,
       agentTimeout: `填写超时`,
       generic: `同步出错`,
     },

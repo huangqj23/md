@@ -73,6 +73,7 @@ export default {
       editorNotFound: `沒找到編輯器，平台頁面可能改版了`,
       fillFailed: `內容沒能填進編輯器`,
       pageTimeout: `頁面載入逾時`,
+      pageError: `頁面沒有打開（已自動重新整理重試一次），多半是網路或代理問題；在該分頁重新整理能打開後再同步`,
       agentTimeout: `填寫逾時`,
       generic: `同步出錯`,
     },

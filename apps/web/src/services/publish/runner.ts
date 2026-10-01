@@ -14,7 +14,17 @@ export type RunStatus
     | `failed`
     | `cancelled`
 
-export type RunErrorCode = AgentErrorCode | `page-timeout` | `agent-timeout` | `no-result` | `too-many-steps` | `browser-error`
+export type RunErrorCode = AgentErrorCode | `page-timeout` | `page-error` | `agent-timeout` | `no-result` | `too-many-steps` | `browser-error`
+
+/**
+ * Chrome refuses to inject into a tab showing its own "this page failed to load" screen
+ * ("Frame with ID 0 is showing error page") — a network or proxy failure, not the platform.
+ */
+const ERROR_PAGE_PATTERN = /showing error page/i
+
+function isErrorPage(error: unknown): boolean {
+  return ERROR_PAGE_PATTERN.test(error instanceof Error ? error.message : String(error))
+}
 
 /** Reasons a finished run still needs the user's attention. */
 export type RunWarning = `title-truncated` | `title-not-filled` | `body-partial` | `images-not-uploaded` | `draft-not-saved`
@@ -160,6 +170,28 @@ async function runPlatform(
       return loginRequired(now.url)
     return finish(`failed`, extra)
   }
+  const pageError = async () => {
+    const now = await api.getTab(tabId)
+    return finish(`failed`, { errorCode: `page-error`, detail: `${now?.url ?? platform.startUrl} failed to load` })
+  }
+  /** A page that failed to load (flaky network or proxy) gets one reload before giving up. */
+  const injectAgent = async (): Promise<boolean> => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await api.injectAgent(tabId)
+        return true
+      }
+      catch (error) {
+        if (!isErrorPage(error) || attempt > 0)
+          throw error
+      }
+      await api.reloadTab(tabId)
+      if (!(await waitForTabLoad(api, tabId, timing, sleep, true)))
+        break
+      await sleep(timing.settleDelay)
+    }
+    return false
+  }
 
   let step: string = platform.startStep
   for (let i = 0; i < MAX_STEPS; i++) {
@@ -173,7 +205,15 @@ async function runPlatform(
     run.status = `filling`
     update()
     await api.focusTab(tabId)
-    await api.injectAgent(tabId)
+    try {
+      if (!(await injectAgent()))
+        return pageError()
+    }
+    catch (error) {
+      if (isErrorPage(error))
+        return pageError()
+      throw error
+    }
 
     let result: AgentResult | undefined
     try {
@@ -183,6 +223,8 @@ async function runPlatform(
       )
     }
     catch (error) {
+      if (isErrorPage(error))
+        return pageError()
       // A timeout, or the page navigating away mid-step (which rejects executeScript).
       const detail = error instanceof StepTimeoutError ? `step "${step}" ${error.message}` : error instanceof Error ? error.message : String(error)
       return failUnlessLoginRedirect({ errorCode: error instanceof StepTimeoutError ? `agent-timeout` : `browser-error`, detail })

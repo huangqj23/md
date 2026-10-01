@@ -73,6 +73,7 @@ export default {
       editorNotFound: `Editor not found; the platform page may have changed`,
       fillFailed: `The content could not be put into the editor`,
       pageTimeout: `The page took too long to load`,
+      pageError: `The page did not load (reloaded once already), most likely a network or proxy problem; once it opens in that tab, sync again`,
       agentTimeout: `Filling took too long`,
       generic: `Sync error`,
     },

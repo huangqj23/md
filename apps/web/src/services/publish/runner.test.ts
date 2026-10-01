@@ -25,12 +25,17 @@ interface FakeOptions {
   landOn?: (url: string) => string | undefined
   neverLoads?: boolean
   openFails?: (url: string) => boolean
+  /** The first N injections hit Chrome's "failed to load" page. */
+  errorPageInjections?: number
 }
+
+const ERROR_PAGE = `Frame with ID 0 is showing error page`
 
 function createFakeApi(options: FakeOptions = {}) {
   const tabs = new Map<number, TabSnapshot>()
   const requests: AgentRequest[] = []
   let nextId = 100
+  let errorPagesLeft = options.errorPageInjections ?? 0
   const landOn = options.landOn ?? ((url: string) => url)
   const api: PublishTabsApi = {
     currentTabId: vi.fn(async () => 1),
@@ -54,8 +59,18 @@ function createFakeApi(options: FakeOptions = {}) {
     navigate: vi.fn(async (tabId: number, url: string) => {
       tabs.set(tabId, { url: landOn(url), status: `loading` })
     }),
+    reloadTab: vi.fn(async (tabId: number) => {
+      const tab = tabs.get(tabId)
+      if (tab)
+        tab.status = `loading`
+    }),
     focusTab: vi.fn(async () => {}),
-    injectAgent: vi.fn(async () => {}),
+    injectAgent: vi.fn(async () => {
+      if (errorPagesLeft > 0) {
+        errorPagesLeft--
+        throw new Error(ERROR_PAGE)
+      }
+    }),
     runAgent: vi.fn(async (_tabId: number, request: AgentRequest): Promise<AgentResult | undefined> => {
       requests.push(request)
       return options.agent ? options.agent(request) : { kind: `done`, report: goodReport }
@@ -78,6 +93,32 @@ async function run(platformIds: Parameters<typeof getPublishPlatform>[0][], fake
 }
 
 describe(`runPublish`, () => {
+  it(`reloads a page that failed to load once, then fills it`, async () => {
+    const fake = createFakeApi({ errorPageInjections: 1 })
+    const { runs } = await run([`zhihu`], fake)
+
+    expect(runs[0].status).toBe(`success`)
+    expect(fake.api.reloadTab).toHaveBeenCalledTimes(1)
+    expect(fake.api.injectAgent).toHaveBeenCalledTimes(2)
+  })
+
+  it(`reports which page failed to load when the reload does not help`, async () => {
+    const fake = createFakeApi({ errorPageInjections: 2 })
+    const { runs } = await run([`zhihu`, `juejin`], fake)
+
+    expect(runs[0]).toMatchObject({ status: `failed`, errorCode: `page-error`, detail: `https://zhuanlan.zhihu.com/write failed to load` })
+    expect(fake.api.reloadTab).toHaveBeenCalledTimes(1)
+    // the next platform still runs
+    expect(runs[1].status).toBe(`success`)
+  })
+
+  it(`treats an error page during a step the same way`, async () => {
+    const fake = createFakeApi({ agent: () => { throw new Error(ERROR_PAGE) } })
+    const { runs } = await run([`zhihu`], fake)
+
+    expect(runs[0]).toMatchObject({ status: `failed`, errorCode: `page-error` })
+  })
+
   it(`fills each platform in its own grouped tab and returns to the editor`, async () => {
     const fake = createFakeApi()
     const { runs, updates } = await run([`zhihu`, `juejin`], fake)
