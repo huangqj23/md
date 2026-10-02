@@ -12,6 +12,10 @@ from .triage import Layout
 ARTICLE_SUFFIX = "_AI日报"
 REVIEW_SUFFIX = "_审稿与备选"
 FLAG_MARK = "【待核对"
+# 图源行用 HTML 居中：内嵌版把图片换成 <img> 标签，md 不会把 alt 渲染成图注，只能单独一行。
+# margin-top 为 0，免得主题的段落间距把图源和图片隔开。
+CREDIT_STYLE = "text-align: center; margin: 0 8px 1.5em; font-size: 0.8em; color: #888888;"
+CREDIT_LINE = re.compile(r"^<p\b[^>]*>(图源：.*)</p>$")
 
 
 def paths(out_dir: Path, day: date) -> dict:
@@ -51,7 +55,7 @@ def render_article(layout: Layout, editor: dict) -> str:
     """头条 + 要闻（按分数平铺，不分栏）+ 快讯。"""
     return _tidy(template("daily.md.j2", title=editor["titles"][0], highlights=editor["highlights"],
                           headline=layout.headline, main=layout.main, briefs=layout.briefs,
-                          local_date=_local_date, others=_others))
+                          local_date=_local_date, others=_others, credit_style=CREDIT_STYLE))
 
 
 def render_review(day: date, stem: str, layout: Layout, editor: dict, article_md: str, *, stats: dict,

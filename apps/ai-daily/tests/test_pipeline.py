@@ -95,13 +95,14 @@ def test_full_run_with_llm(http, settings):
     assert "- **工程师视角**：可以直接在 API 里试。" in md
     assert "> 原文：" in md
     assert "Qwen/Qwen-Image-2.1" not in md                      # 09-14 上传的模型上热门榜：旧闻，不收
-    credits = re.findall(r"\]\(images/2026-09-30_\w+_nowm\.png\)\n\n图源：([^\n]+)", md)
+    credits = re.findall(r"\]\(images/2026-09-30_\w+_nowm\.png\)\n\n<p style=\"[^\"]*text-align: center[^\"]*\">图源：([^\n<]+)</p>", md)
     assert len(credits) >= 9                                     # 头条 + 10 条要闻，大部分有配图
     assert "X @OpenAI" in credits and "GitHub Trending" in credits   # 推文自带的图、仓库卡片都用上了
     # 头条里编造的那句原文被核对出来，其余条目的引用都能在原文里找到
     assert result.n_flags == 1 and "1 条原文句在来源里没找到" in md
     # 头条配图：官方博客的 og:image，存成 _nowm，不加水印
-    assert re.search(r"!\[中文标题\]\(images/2026-09-30_h_nowm\.png\)\n\n图源：OpenAI 官方博客", md)
+    assert re.search(r"!\[中文标题\]\(images/2026-09-30_h_nowm\.png\)\n\n<p [^>]*>图源：OpenAI 官方博客</p>", md)
+    assert "关注**Hollis的多模态大模型实战**：" in md               # 文末公众号名加粗
     assert (result.article.parent / "images" / "2026-09-30_h_nowm.png").is_file()
 
     review = result.review.read_text(encoding="utf-8")
@@ -211,6 +212,8 @@ def test_preview_page_embeds_images_and_shows_draft_status(http, settings, tmp_p
     assert page.startswith("<title>AI 早报 09.30</title>")
     assert page.count("data:image/webp;base64,") == info["images"] >= 9      # 图片全部内嵌，不引用本地文件
     assert 'src="images/' not in page
+    assert page.count("<figcaption>图源：") == info["images"]           # 居中的 HTML 图源行也当作图注
+    assert "&lt;p style=" not in page
     assert '<li class="used">AI 早报 09.30｜GPT-6.1 Sol 价格降到五分之一</li>' in page   # 候选标题里标出正文在用的
     assert '<span class="cred official">官方</span>' in page and 'class="flag"' in page
 

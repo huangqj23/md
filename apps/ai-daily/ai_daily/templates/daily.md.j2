@@ -6,7 +6,7 @@
 {% if ev.image_path %}
 ![{{ ev.display_title }}]({{ ev.image_path }})
 
-{{ ev.image_credit }}
+<p style="{{ credit_style }}">{{ ev.image_credit | e }}</p>
 
 {% endif %}
 {% endmacro %}
@@ -76,4 +76,4 @@
 
 图片版权归原作者，出处见图注。
 
-关注Hollis的多模态大模型实战：每天一份 AI 早报，只看一手来源；能跑的，我先跑一下。
+关注**Hollis的多模态大模型实战**：每天一份 AI 早报，只看一手来源；能跑的，我先跑一下。

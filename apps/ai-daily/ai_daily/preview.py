@@ -12,6 +12,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from .render import CREDIT_LINE
+
 MAX_W, QUALITY = 1000, 72
 
 
@@ -136,7 +138,9 @@ def render_body(md: str, base: Path) -> tuple[str, dict]:
             html_parts.append(f'<figure><img src="{src}" width="{w}" height="{h}" alt="{html.escape(m.group(1))}" '
                               'loading="lazy"></figure>')
             continue
-        if first.startswith("图源："):
+        credit = CREDIT_LINE.match(first)
+        if credit or first.startswith("图源："):   # 新稿是居中的 HTML 行，旧稿是纯文本
+            first = html.unescape(credit.group(1)) if credit else first
             cap = f'<figcaption>{inline(first)}</figcaption></figure>'
             if html_parts and html_parts[-1].endswith("</figure>"):
                 html_parts[-1] = html_parts[-1][: -len("</figure>")] + cap
