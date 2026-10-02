@@ -102,7 +102,7 @@ def test_full_run_with_llm(http, settings):
     assert result.n_flags == 1 and "1 条原文句在来源里没找到" in md
     # 头条配图：官方博客的 og:image，存成 _nowm，不加水印
     assert re.search(r"!\[中文标题\]\(images/2026-09-30_h_nowm\.png\)\n\n<p [^>]*>图源：OpenAI 官方博客</p>", md)
-    assert "关注**Hollis的多模态大模型实战**：" in md               # 文末公众号名加粗
+    assert "关注**Hollis的多模态视觉大模型实战**：" in md               # 文末公众号名加粗
     assert (result.article.parent / "images" / "2026-09-30_h_nowm.png").is_file()
 
     review = result.review.read_text(encoding="utf-8")
