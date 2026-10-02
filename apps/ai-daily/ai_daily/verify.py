@@ -43,7 +43,7 @@ _NUM = re.compile(r"(\d+(?:,\d{3}(?!\d))*(?:\.\d+)?)\s*(万亿|亿|万|千|trill
 
 
 def _value(num: str, unit: str) -> Decimal:
-    return Decimal(num.replace(",", "")).scaleb(_EXP[unit]).normalize()
+    return Decimal(num.replace(",", "")).scaleb(_EXP.get(unit, 0)).normalize()
 
 
 _MONTHS = ("january|jan", "february|feb", "march|mar", "april|apr", "may", "june|jun", "july|jul",
@@ -59,7 +59,8 @@ def missing_numbers(text: str, source: str) -> list[str]:
     """正文里的数字（两位以上或带小数，年份除外）在原文里找不到的。带数量级的（亿、billion 等）按数值比，
     “11 月”这样的月份对原文里的英文月份名。"""
     src = normalize(source).replace(",", "")
-    src_values = {_value(n, u) for n, u in _NUM.findall(normalize(source)) if u}
+    # 原文里的数都按数值收（不带单位的也收）：“1.3 万张”要能对上原文的“13,000 images”
+    src_values = {_value(n, u) for n, u in _NUM.findall(normalize(source))}
     norm = normalize(text)
     out = set()
     for m in _NUM.finditer(norm):

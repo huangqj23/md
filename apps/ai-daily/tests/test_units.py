@@ -152,3 +152,9 @@ def test_primary_source_follows_the_event_title_then_heat():
     assert pick_primary([kit, ep, gemm, tweet], "DeepSeek 开源昇腾版 DeepEP 与 DeepGEMM") is gemm   # 名字都对上，star 多的
     assert pick_primary([kit, ep, tweet], "DeepSeek 开源昇腾版 DeepEP") is ep
     assert pick_primary([tweet, kit]) is kit                    # 可信度仍然最先比
+
+
+def test_missing_numbers_matches_wan_against_plain_source_numbers():
+    src = "Security startup Glow Security found more than 13,000 images at 343 organizations."
+    assert missing_numbers("超过 1.3 万张截图，涉及 343 家组织", src) == []
+    assert missing_numbers("超过 2.6 万张截图", src) == ["2.6"]                  # 对不上的照样标出来
