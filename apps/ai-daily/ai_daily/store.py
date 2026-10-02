@@ -4,7 +4,7 @@ import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from .models import Item, canonical_url
+from .models import Item, canonical_url, item_id
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
@@ -147,12 +147,23 @@ class Store:
         return {r[0] for r in rows}
 
     def recent_titles(self, day: date, days: int = 3) -> list[str]:
-        """近几天已发、或写进过草稿的条目标题，给选题做“别重复、是不是后续”的判断。"""
+        """近几天已发、或写进过草稿的条目标题，给选题做“别重复、是不是后续”的判断。
+        快讯的中文短标题常常不带名字（“NVIDIA 发布表格预测模型”），所以再附上这些条目链接对应的原文标题
+        （“Kumo Tabular …”），换个媒体转述同一件事时选题才认得出来。"""
         args = ((day - timedelta(days=days)).isoformat(), day.isoformat()) * 2
         rows = self.db.execute("SELECT day, title FROM published_titles WHERE day >= ? AND day < ? "
                                "UNION SELECT day, title FROM drafted_titles WHERE day >= ? AND day < ? "
                                "ORDER BY day", args)
-        return [f"{d} {t}" for d, t in rows]
+        out = [f"{d} {t}" for d, t in rows]
+        links = self.db.execute("SELECT day, url FROM published WHERE day >= ? AND day < ? "
+                                "UNION SELECT day, url FROM drafted WHERE day >= ? AND day < ? ORDER BY day", args)
+        seen = set()
+        for d, url in links:
+            row = self.db.execute("SELECT title FROM items WHERE id = ?", (item_id(url),)).fetchone()
+            if row and row[0] and row[0] not in seen:
+                seen.add(row[0])
+                out.append(f"{d} 原文标题：{row[0][:100]}")
+        return out
 
     # ---- GitHub 仓库创建时间（不会变，查过就存）
     def repo_created(self) -> dict[str, str]:

@@ -219,3 +219,39 @@ def test_page_images_skip_site_logos_and_use_lazy_body_images():
     assert got == ["https://img.site.com/news/1.jpg", "https://mp.toutiao.com/open_image/get?code=abc"]
     with_og = html.replace("imgs/qbitai-logo-1.png", "2026/09/cover.png")
     assert enrich.page_images(BeautifulSoup(with_og, "lxml"), "https://www.qbitai.com/")[0].endswith("/2026/09/cover.png")
+
+
+def test_thin_main_events_swap_with_briefs_that_have_material():
+    def ev(title, thin):
+        e = _event(_item(title), title=title)
+        e.thin = thin
+        return e
+
+    def enrich(e):
+        if e.thin:
+            e.flags.append("主来源网页打不开（HTTPStatusError），只能依据信源摘要")
+            e.source_text = "One sentence."
+        else:
+            e.source_text = "正文" * 400
+
+    paywalled, ok = ev("付费墙", True), ev("正常", False)
+    for e in (paywalled, ok):
+        enrich(e)
+    also_thin, readable, rest = ev("快讯也打不开", True), ev("快讯能抓到", False), ev("其他快讯", False)
+    layout = Layout(_event(_item("h"), title="头条"), [paywalled, ok], [also_thin, readable, rest], [])
+    calls = []
+    moved = pipeline.swap_thin_events(layout, lambda e: (calls.append(e.title), enrich(e)))
+    assert moved == ["付费墙"]
+    assert [e.title for e in layout.main] == ["正常", "快讯能抓到"]               # 补进来的排在要闻末尾
+    assert [e.title for e in layout.briefs] == ["付费墙", "快讯也打不开", "其他快讯"]
+    assert calls == ["快讯也打不开", "快讯能抓到"]                                 # 每条最多抓一次，够了就停
+
+
+def test_recent_titles_include_original_titles_of_drafted_links(tmp_path):
+    store = Store(tmp_path / "db")
+    kumo = _item("Kumo Tabular: a tabular foundation model", url="https://huggingface.co/blog/nvidia/kumo-tabular")
+    store.mark_seen([kumo], NOW)
+    store.mark_drafted(date(2026, 9, 30), ["https://huggingface.co/blog/nvidia/kumo-tabular"], ["NVIDIA 发布表格预测模型"])
+    recent = store.recent_titles(date(2026, 10, 2))
+    assert recent == ["2026-09-30 NVIDIA 发布表格预测模型", "2026-09-30 原文标题：Kumo Tabular: a tabular foundation model"]
+    store.close()

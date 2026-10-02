@@ -3,9 +3,10 @@
 正文不分栏：要闻按分数平铺。主线（llm / agent / vision / other）仍然会归类，只用于封面统计。
 """
 import logging
+import re
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from .classify import guess_track, heuristic_score
 from .models import LABELS, TRACKS, Event, Item, pick_primary
@@ -50,9 +51,49 @@ def _when(dt: datetime | None) -> str:
     return dt.astimezone().strftime("%m-%d %H:%M") if dt else "时间未知"
 
 
-def candidate_line(i: int, it: Item) -> str:
-    return (f"[{i}] {it.kind} | {it.source_name} | {it.label} | {_when(it.published)} | {it.title} ｜ "
+def candidate_line(i: int, it: Item, earlier: str = "") -> str:
+    line = (f"[{i}] {it.kind} | {it.source_name} | {it.label} | {_when(it.published)} | {it.title} ｜ "
             f"{clip(it.summary, 160)} ｜ {_signals(it)}")
+    return f"{line} ｜ 疑似旧闻：{earlier}" if earlier else line
+
+
+_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9.\-]*[A-Za-z0-9]")
+_COMMON = set("""with from that this your into over about after than what when will have more most just only their
+they them here there which while were been being does could would should model models open source release releases
+released launch launches launched introducing introduces introduce announces announced says said report reports
+update updates version based using first best latest today week year agent agents data new the and for its now how
+why are can our you all one two""".split())
+OLD_NEWS_HOURS = 24        # 窗口开始前这么久以前就出现过的，才算“已经是旧闻”
+RARE_DF = 3                # 当天所有标题里最多出现这么多次的名字才算少见
+
+
+def _names(title: str) -> set[str]:
+    """标题里像名字的词（产品名、型号）：大写开头或带数字，3 个字符以上，去掉常见词；统一成小写。"""
+    return {t.lower() for t in _TOKEN.findall(title)
+            if len(t) >= 3 and (t[0].isupper() or any(c.isdigit() for c in t)) and t.lower() not in _COMMON}
+
+
+def earlier_matches(items: list[Item], before: list[tuple[datetime, str, str]], since: datetime) -> list[str]:
+    """逐个候选找“疑似旧闻”：和窗口开始前一天以上的某条动态共有两个以上少见的名字（Kumo、Tabular）。
+    少见按当天所有标题算（Gemini、Meta 这类到处都是的不算）；版本发布（gh:）每版都不同，两边都不比。
+    返回和 items 对齐的说明，没有的是空串。"""
+    df = Counter(n for title in [it.title for it in items] + [b[2] for b in before] for n in _names(title))
+
+    def rare(title: str) -> set[str]:
+        return {n for n in _names(title) if df[n] <= RARE_DF}
+
+    old = [(b, rare(b[2])) for b in before
+           if b[0] <= since - timedelta(hours=OLD_NEWS_HOURS) and not b[1].startswith("gh:")]
+    out = []
+    for it in items:
+        names = rare(it.title) if it.kind != "release" else set()
+        best = max(old, key=lambda o: len(names & o[1]), default=None) if names else None
+        if best is not None and len(names & best[1]) >= 2:
+            when, src, title = best[0]
+            out.append(f"{_when(when)} {src}《{clip(title, 60)}》")
+        else:
+            out.append("")
+    return out
 
 
 def _index(value, n: int) -> int | None:
@@ -68,7 +109,8 @@ def llm_events(llm, items: list[Item], day: date, recent: list[str], *, now: dat
     """before：窗口开始前已经出现过的 (发布时间, 信源, 标题)，只用来识别转述的旧闻，不是候选。"""
     user = prompt("triage_user.md", day=day.isoformat(), recent=recent, now=_when(now), since=_when(since),
                   before=[f"{_when(t)} | {src} | {clip(title, 100)}" for t, src, title in before],
-                  lines=[candidate_line(i, it) for i, it in enumerate(items)])
+                  lines=[candidate_line(i, it, hint)
+                         for i, (it, hint) in enumerate(zip(items, earlier_matches(items, before, since)))])
     data = llm.json(prompt("triage_system.md"), user, max_tokens=32000)
     events, used = [], set()
     for e in data.get("events") or []:

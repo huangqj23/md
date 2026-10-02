@@ -154,6 +154,40 @@ def test_primary_source_follows_the_event_title_then_heat():
     assert pick_primary([tweet, kit]) is kit                    # 可信度仍然最先比
 
 
+def test_newsletter_lead_to_the_companys_own_site_counts_as_official():
+    blog = Item("tldr-ai", "blog.cloudflare.com", "newsletter", "Clef: open decision models",
+                "https://blog.cloudflare.com/clef-decision-models/", meta={"via": "TLDR AI"})
+    release = Item("gh:ollama/ollama", "ollama/ollama", "release", "ollama/ollama v0.35.1-rc1",
+                   "https://github.com/ollama/ollama/releases/tag/v0.35.1-rc1", summary="models: add clef support")
+    assert blog.label == "媒体" and release.label == "代码"
+    assert pick_primary([release, blog], "Cloudflare 开源决策模型 Clef 与 RL 微调平台") is blog
+    assert pick_primary([release, blog], "Ollama 支持 Clef") is release        # 链到的不是标题里那家公司
+
+
+def test_candidates_that_rename_an_earlier_release_are_tagged():
+    from datetime import datetime, timezone
+
+    from ai_daily.triage import candidate_line, earlier_matches
+    since = datetime(2026, 9, 30, 23, 5, tzinfo=timezone.utc)
+    before = [(datetime(2026, 9, 29, 15, 30, tzinfo=timezone.utc), "hf-blog",
+               "NVIDIA Kumo Tabular Sets a New Accuracy-Efficiency Frontier for Tabular Prediction"),
+              (datetime(2026, 9, 30, 21, 15, tzinfo=timezone.utc), "hf-trending", "Cloudflare/Clef decision model"),
+              (datetime(2026, 9, 29, 9, 0, tzinfo=timezone.utc), "the-decoder", "Agents need an operating system")]
+
+    def item(title, kind="media"):
+        return Item("s", "S", kind, title, "https://e.com/" + title[:8])
+
+    items = [item("NVIDIA Releases Kumo Tabular: Open Tabular Foundation Models That Predict New Rows"),
+             item("Cloudflare Releases Clef: Open Decision Models"),        # 窗口前 2 小时才出现：今天的新闻
+             item("Brian Chesky: AI agents need their own operating system"),   # 普通词重合不算名字
+             item("NVIDIA releases a new open model for robotics")]
+    hits = earlier_matches(items, before, since)
+    assert "hf-blog" in hits[0] and "Kumo Tabular" in hits[0]
+    assert hits[1:] == ["", "", ""]
+    line = candidate_line(0, items[0], hits[0])
+    assert line.endswith(f"｜ 疑似旧闻：{hits[0]}")
+
+
 def test_missing_numbers_matches_wan_against_plain_source_numbers():
     src = "Security startup Glow Security found more than 13,000 images at 343 organizations."
     assert missing_numbers("超过 1.3 万张截图，涉及 343 家组织", src) == []

@@ -57,7 +57,12 @@ class Item:
 
     @property
     def id(self) -> str:
-        return hashlib.sha1(canonical_url(self.url).encode("utf-8")).hexdigest()[:16]
+        return item_id(self.url)
+
+
+def item_id(url: str) -> str:
+    """条目在库里的 id：规范化链接的 sha1 前 16 位（同一链接不同写法是同一条）。"""
+    return hashlib.sha1(canonical_url(url).encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass
@@ -103,10 +108,21 @@ def _heat(it: Item) -> int:
     return m.get("stars_today") or m.get("stars") or m.get("points") or m.get("upvotes") or m.get("likes") or 0
 
 
+def _rank(it: Item, hint: str) -> int:
+    """可信度排第几。newsletter / HN 这类线索（meta 里有 via）链到事件标题里那家公司自己的网站时
+    （blog.cloudflare.com 之于“Cloudflare 开源 Clef”），按官方算。"""
+    label = it.label
+    if it.meta.get("via") and hint:
+        parts = (urlsplit(it.url).hostname or "").lower().split(".")
+        site = parts[-2] if len(parts) >= 2 else ""
+        if len(site) >= 3 and site in hint.lower():
+            label = "官方"
+    return LABELS.index(label) if label in LABELS else len(LABELS)
+
+
 def pick_primary(items: list[Item], hint: str = "") -> Item:
     """主来源：可信度最高的。同级里先看标题跟事件标题（hint）重合的英文名多少，再看热度（star、HN 分数、点赞），
     最后看信息多少。选题常把同一家公司当天的几个仓库并成一个事件，不能让内部小仓库顶替真正的发布。"""
     names = set(_NAME.findall(hint.lower()))
-    return min(items, key=lambda it: (LABELS.index(it.label) if it.label in LABELS else len(LABELS),
-                                      -len(names & set(_NAME.findall(it.title.lower()))), -_heat(it),
-                                      -len(it.summary)))
+    return min(items, key=lambda it: (_rank(it, hint), -len(names & set(_NAME.findall(it.title.lower()))),
+                                      -_heat(it), -len(it.summary)))
