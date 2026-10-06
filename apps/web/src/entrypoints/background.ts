@@ -67,7 +67,7 @@ export default defineBackground({
         void handleAiDailyMenuClick(browser as unknown as MenuExtension, info, tab)
     })
 
-    // The inbox menu only exists while nativeMessaging is granted (it is optional, requested from the AI daily panel).
+    // The inbox menu only exists while nativeMessaging is granted (required in Chrome / Edge builds; older builds had it optional).
     browser.runtime.onInstalled.addListener(syncAiDaily)
     browser.permissions?.onAdded.addListener((permissions) => {
       if (isNativePermissionChange(permissions))

@@ -11,10 +11,11 @@ from .triage import Layout
 
 ARTICLE_SUFFIX = "_AI日报"
 REVIEW_SUFFIX = "_审稿与备选"
+EMBED_SUFFIX = "_内嵌图片版"          # ai-daily publish 调 watermark.py 生成的发布版
+GENERATED = re.compile(r"^- 生成时间：(\S+)$", re.M)
 FLAG_MARK = "【待核对"
-# 图源行用 HTML 居中：内嵌版把图片换成 <img> 标签，md 不会把 alt 渲染成图注，只能单独一行。
-# margin-top 为 0，免得主题的段落间距把图源和图片隔开。
-CREDIT_STYLE = "text-align: center; margin: 0 8px 1.5em; font-size: 0.8em; color: #888888;"
+# 图源现在接在图片下面第一段末尾的括号里（2026-10-04 起）；10-01 至 10-04 的旧稿是图片下面单独一行
+# 居中的 HTML，预览页仍按图注处理。
 CREDIT_LINE = re.compile(r"^<p\b[^>]*>(图源：.*)</p>$")
 
 
@@ -55,17 +56,17 @@ def render_article(layout: Layout, editor: dict) -> str:
     """头条 + 要闻（按分数平铺，不分栏）+ 快讯。"""
     return _tidy(template("daily.md.j2", title=editor["titles"][0], highlights=editor["highlights"],
                           headline=layout.headline, main=layout.main, briefs=layout.briefs,
-                          local_date=_local_date, others=_others, credit_style=CREDIT_STYLE))
+                          local_date=_local_date, others=_others))
 
 
 def render_review(day: date, stem: str, layout: Layout, editor: dict, article_md: str, *, stats: dict,
-                  n_items: int, n_candidates: int, n_events: int, llm_usage: str) -> str:
+                  n_items: int, n_candidates: int, n_events: int, llm_usage: str, generated: str = "") -> str:
     return _tidy(template(
         "review.md.j2", day=day.isoformat(), article_stem=stem, n_flags=article_md.count(FLAG_MARK),
         titles=editor["titles"], headline=layout.headline, backup=layout.backup,
         track_name=lambda t: TRACK_NAMES.get(t, "其他"), clip=clip,
         stats=sorted(stats.items(), key=lambda kv: str(kv[0])), n_items=n_items, n_candidates=n_candidates,
-        n_events=n_events, llm_usage=llm_usage))
+        n_events=n_events, llm_usage=llm_usage, generated=generated))
 
 
 def cover_spec(day: date, issue: int, layout: Layout, editor: dict) -> dict:

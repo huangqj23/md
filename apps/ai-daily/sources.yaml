@@ -71,7 +71,9 @@ feeds:
   - {key: tldr-ai, name: TLDR AI, url: "https://tldr.tech/api/rss/ai", kind: newsletter, parser: tldr, max_items: 20}
 
   # ---- 社区
-  - {key: reddit-localllama, name: Reddit r/LocalLLaMA, url: "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day", kind: community, track: llm, max_items: 12}
+  # 链接帖的帖子页只有标题，follow_original 改用帖子里 [link] 指向的原文（自发帖、图片帖不变）
+  - {key: reddit-localllama, name: Reddit r/LocalLLaMA, url: "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day", kind: community, track: llm, max_items: 12,
+     follow_original: true}
 
   # ---- 国内媒体：2026-09-30 起不收（用户要求媒体只看国外的）。国内大模型公司自己的发布照收，见下面的 labs、
   # hf.orgs 和上面的 Alizila。要恢复就去掉下面的注释（机器之心 RSS 已转付费、36氪 feed 反爬、虎嗅连不上，本来就不收）

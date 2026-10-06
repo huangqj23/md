@@ -1,5 +1,5 @@
 /**
- * Model settings for the AI daily pipeline. Keys are stored by the local ai-daily host (DPAPI-encrypted);
+ * Model settings for the AI daily pipeline. Keys are stored by the local ai-daily host (DPAPI on Windows, the login Keychain on macOS);
  * the extension only ever sends new keys and gets masked hints back.
  */
 
@@ -39,7 +39,7 @@ export interface LlmReadiness {
 
 export interface LlmView {
   source: `file` | `env` | `none`
-  encryption: `dpapi` | `plain`
+  encryption: `dpapi` | `keychain` | `plain`
   providers: LlmProvider[]
   roles: Record<LlmRoleId, LlmRole>
   readiness: LlmReadiness

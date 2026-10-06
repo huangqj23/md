@@ -144,16 +144,22 @@ def cmd_preview(args, settings, sources) -> int:
 
 def cmd_install_host(args, settings, sources) -> int:
     from . import host_install
-    browsers = list(host_install.REG_KEYS) if args.browser == "all" else [args.browser]
-    path = host_install.install(args.extension_id, browsers)
-    print(f"已注册 Native Messaging host（{', '.join(browsers)}）：{path}")
+    browsers = list(host_install.BROWSERS) if args.browser == "all" else [args.browser]
+    ids = args.extension_id or [host_install.default_extension_id()]
+    if not args.extension_id:
+        print(f"扩展 ID：{ids[0]}（从 {host_install.EXTENSION_DIR} 加载扩展时的 ID）")
+    done = host_install.install(ids, browsers)
+    if not done:
+        print(f"没有找到已安装的浏览器（{', '.join(browsers)}），没有注册")
+        return 1
+    print(f"已注册 Native Messaging host（{', '.join(done)}）：{host_install.MANIFEST}")
     print("回到 md 扩展的“AI 早报”面板点“重新检测”。")
     return 0
 
 
 def cmd_uninstall_host(args, settings, sources) -> int:
     from . import host_install
-    host_install.uninstall(list(host_install.REG_KEYS))
+    host_install.uninstall(list(host_install.BROWSERS))
     print("已注销 Native Messaging host")
     return 0
 
@@ -177,9 +183,9 @@ def main(argv=None) -> int:
     p.add_argument("--date", help="稿件日期，默认今天")
     p.add_argument("--skip-links", action="store_true", help="不检查链接能否打开")
     h = sub.add_parser("install-host", help="注册 Native Messaging host，让 md 扩展的“AI 早报”面板能调用本机")
-    h.add_argument("--extension-id", action="append", required=True,
-                   help="md 扩展的 ID（面板里会显示；可重复，开发版和打包版 ID 不同时都加上）")
-    h.add_argument("--browser", choices=["chrome", "edge", "chromium", "all"], default="all")
+    h.add_argument("--extension-id", action="append",
+                   help="md 扩展的 ID（面板里会显示；可重复）。不写时按 apps/web/.output/chrome-mv3 的路径算出来")
+    h.add_argument("--browser", choices=["chrome", "edge", "chromium", "doubao", "all"], default="all")
     sub.add_parser("uninstall-host", help="注销 Native Messaging host")
     sub.add_parser("llm-status", help="查看当前的模型配置（选题 / 写稿用哪家、哪个模型）")
     v = sub.add_parser("preview", help="把当天的草稿渲染成自带图片的 HTML 预览页")

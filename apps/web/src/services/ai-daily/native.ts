@@ -148,8 +148,14 @@ export function resolveLoadTarget(loadedPosts: Record<string, string>, date: str
   return id && postExists(id) ? { postId: id } : null
 }
 
-export function installCommand(extensionId: string): string {
-  return `.venv\\Scripts\\ai-daily install-host --extension-id ${extensionId}`
+/** The venv's scripts live in `.venv\Scripts` on Windows and `.venv/bin` on macOS / Linux. */
+export function installCommand(extensionId: string, windows = isWindows()): string {
+  const cli = windows ? `.venv\\Scripts\\ai-daily` : `.venv/bin/ai-daily`
+  return `${cli} install-host --extension-id ${extensionId}`
+}
+
+export function isWindows(userAgent = globalThis.navigator?.userAgent ?? ``): boolean {
+  return userAgent.includes(`Windows`)
 }
 
 /** Local date as YYYY-MM-DD (the pipeline names drafts by local date, not UTC). */

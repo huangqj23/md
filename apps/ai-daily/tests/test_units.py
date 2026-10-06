@@ -192,3 +192,14 @@ def test_missing_numbers_matches_wan_against_plain_source_numbers():
     src = "Security startup Glow Security found more than 13,000 images at 343 organizations."
     assert missing_numbers("超过 1.3 万张截图，涉及 343 家组织", src) == []
     assert missing_numbers("超过 2.6 万张截图", src) == ["2.6"]                  # 对不上的照样标出来
+
+
+def test_hn_lead_to_a_hyphenated_company_site_counts_as_official():
+    """2026-10-04：aleph-alpha.com 没对上“Aleph Alpha”，Reddit 帖子顶替了官方博客当主来源。"""
+    blog = Item("hn", "aleph-alpha.com", "community", "Kolibri: A Sovereign Open-Weight Model",
+                "https://aleph-alpha.com/en/blog/kolibri-has-landed-a-sovereign-open-weight-model/",
+                meta={"via": "Hacker News", "points": 300})
+    reddit = Item("reddit-localllama", "Reddit r/LocalLLaMA", "community",
+                  "Aleph-Alpha/Kolibri-1 · Hugging Face - 78B parameters. 3.46B active",
+                  "https://www.reddit.com/r/LocalLLaMA/comments/1wwl7y6/x/")
+    assert pick_primary([reddit, blog], "Aleph Alpha 开源 78B MoE 模型 Kolibri") is blog

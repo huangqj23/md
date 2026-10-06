@@ -53,7 +53,7 @@ collect（官方博客 / 国内大模型公司的官方渠道 / 海外媒体 / n
 4. 推文里附带链接的网页的图；
 5. 通用卡片：HF 模型分享卡、GitHub 仓库预览图。
 
-都是第三方图：文件名带 `_nowm`（只内嵌、不加水印），图注写“图源：网站名 / X @账号”。
+都是第三方图：文件名带 `_nowm`（只内嵌、不加水印），图源接在图片下面第一段末尾的括号里：“（图源：网站名 / X @账号）”，不单独一行。
 
 ## 安装
 
@@ -89,12 +89,15 @@ powershell -ExecutionPolicy Bypass -File scripts\install_task.ps1   # 每天 07:
 
 ## 浏览器面板（md 扩展里的“AI 早报”）
 
-同一仓库的 md Chrome / Edge 扩展（`apps/web`）里有“AI 早报”面板，能在浏览器里生成草稿、看待办、生成内嵌版、载入编辑器，也能在任意网页右键“投喂到 AI 早报”。它通过 Native Messaging 调用本目录的 `ai-daily-host.exe`（`ai_daily/native_host.py`），第一次用时按面板提示注册：
+同一仓库的 md Chrome / Edge 扩展（`apps/web`）里有“AI 早报”面板，能在浏览器里生成草稿、看待办、生成内嵌版、载入编辑器，也能在任意网页右键“投喂到 AI 早报”。它通过 Native Messaging 调用本目录的 `ai-daily-host.exe`（`ai_daily/native_host.py`），构建扩展后注册一次（macOS 上把 `.venv\Scripts\` 换成 `.venv/bin/`）：
 
 ```powershell
-.venv\Scripts\ai-daily install-host --extension-id <面板里显示的扩展 ID>
-.venv\Scripts\ai-daily uninstall-host        # 需要时注销
+.venv\Scripts\ai-daily install-host        # 按 apps/web/.output/chrome-mv3 的路径算出扩展 ID
+.venv\Scripts\ai-daily install-host --extension-id <面板里显示的扩展 ID>   # 从别的目录加载时
+.venv\Scripts\ai-daily uninstall-host      # 需要时注销
 ```
+
+换电脑不用拷 `data/ai_daily.db`：每次生成前会从 vault 里前 7 天的正文补记写过的链接和标题，从审稿清单的“生成时间”补上一期的生成时间（`ai_daily/history.py`）。
 
 慢操作（run / publish）在独立的后台进程里跑，状态在 `data/jobs/`，关掉面板不会中断。详细说明见 [docs/ai-daily.md](../../docs/ai-daily.md)。
 
@@ -105,7 +108,7 @@ powershell -ExecutionPolicy Bypass -File scripts\install_task.ps1   # 每天 07:
 - **两个用途分别选厂商和模型**：选题（一次读 ~200 条候选，用便宜、长上下文的模型）和写稿（逐条写，质量优先），可以是不同厂商。
 - **预置厂商**（`ai_daily/providers.py`，地址在 2026-09-30 逐个核实）：DeepSeek、通义千问（百炼）、Kimi、智谱 GLM、MiniMax、豆包（火山方舟）、硅基流动、OpenRouter、OpenAI、Google Gemini、xAI Grok、Claude（Anthropic 官方 SDK）、Ollama / 本机或内网服务。另外可以添加任意 OpenAI 兼容接口（自建 vLLM、代理等）。
 - **测试连接**：用面板里当前填的 key（可以还没保存）拉取厂商的模型列表，再用选定模型做一次最小的 JSON 调用。
-- **key 的存放**：面板经 native host 写入 `data/llm.json`，key 用 Windows DPAPI 加密（绑定当前 Windows 用户）；面板只能写入，读回来的只有 `sk-…a1b2` 这样的首尾几位，浏览器里不保存。计划任务和后台任务直接读这个文件，不需要开浏览器。
+- **key 的存放**：面板经 native host 写入 `data/llm.json`，key 在 Windows 上用 DPAPI 加密（绑定当前 Windows 用户），在 macOS 上存进登录钥匙串；面板只能写入，读回来的只有 `sk-…a1b2` 这样的首尾几位，浏览器里不保存。计划任务和后台任务直接读这个文件，不需要开浏览器。
 - **Claude**：走 `anthropic` 官方 SDK。Claude Opus 5 等模型默认开启服务端回退 `fallbacks: "default"`（安全分类器拒绝时由 Anthropic 换模型重跑），`stop_reason` 为 `refusal` 时标记该条需人工处理。
 - **兼容接口的参数差异**：遇到不支持 `response_format`、只认 `max_completion_tokens`、不接受 `temperature` 的接口，会按报错自动调整后重试。
 - **代理**：本机 / 内网地址（以及 Windows 代理设置里“不走代理”的地址）直连，其余走系统代理。httpx2 不认 Windows 的代理绕过列表，开着 Clash 时不这样处理，本机 Ollama、内网 vLLM 会被塞给代理而卡住。

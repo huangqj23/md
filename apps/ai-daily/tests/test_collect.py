@@ -225,3 +225,17 @@ def test_aggregator_items_point_at_the_original_article(http):
     assert it.meta["via_url"] == "https://www.techmeme.com/260930/p52#a260930p52"
     [plain] = feeds.collect_feed(http, {**spec, "follow_original": False}, SINCE)
     assert plain.url.startswith("https://www.techmeme.com/") and plain.source_name == "Techmeme"
+
+
+def test_reddit_link_posts_follow_the_linked_article(http):
+    """2026-10-05：Micron 那条是链接帖，帖子页只有标题，写稿只能写“原文缺失”。改用 [link] 指向的原文；
+    图片帖（i.redd.it）和自发帖保持 Reddit 链接。"""
+    spec = {"key": "reddit-localllama", "name": "Reddit r/LocalLLaMA", "kind": "community",
+            "url": "https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day", "follow_original": True}
+    items = {it.title[:20]: it for it in feeds.collect_feed(http, spec, NOW - timedelta(days=400))}
+    amd = next(it for t, it in items.items() if t.startswith("AMD's new 256"))
+    assert amd.url.startswith("https://www.tomshardware.com/") and amd.source_name == "tomshardware.com"
+    assert amd.meta["via"] == "Reddit r/LocalLLaMA" and "reddit.com/r/LocalLLaMA/comments/" in amd.meta["via_url"]
+    image_posts = [it for it in items.values() if "redd.it" in it.url]
+    assert not image_posts                                       # 图片不当原文
+    assert any("reddit.com/r/LocalLLaMA/comments/" in it.url for it in items.values())   # 图片帖、自发帖仍链到帖子

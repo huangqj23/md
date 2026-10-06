@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import subprocess
 import sys
@@ -10,6 +11,7 @@ import pytest
 
 from ai_daily import jobs, native_host as nh
 from ai_daily.config import Settings
+from ai_daily import host_install
 from ai_daily.host_install import build_manifest
 
 DAY = "2026-09-30"
@@ -117,6 +119,21 @@ def test_open_builds_obsidian_uri(settings):
     assert nh.handle({"cmd": "open", "date": DAY, "which": "review", "dry_run": True}, settings)["ok"] is False
 
 
+def test_open_refuses_a_vault_obsidian_has_never_opened(settings, tmp_path, monkeypatch):
+    write_draft(settings)
+    config = tmp_path / "obsidian.json"
+    config.write_text('{"vaults": {"a": {"path": "/Users/x/Data/Obisidian", "open": true}}}', encoding="utf-8")
+    monkeypatch.setattr(nh, "obsidian_config", lambda: config)
+    opened = []
+    monkeypatch.setattr(nh, "open_external", opened.append)
+    r = nh.handle({"cmd": "open", "date": DAY, "which": "article"}, settings)
+    assert r["ok"] is False and "打开本地仓库" in r["error"] and opened == []
+    config.write_text(json.dumps({"vaults": {"b": {"path": str(settings.vault)}}}), encoding="utf-8")
+    assert nh.handle({"cmd": "open", "date": DAY, "which": "article"}, settings)["ok"] is True
+    assert opened == ["obsidian://open?vault=vault&file=AI_Daily/2026-09/2026-09-30_AI%E6%97%A5%E6%8A%A5"]
+    assert nh.vault_known_to_obsidian(settings.vault, tmp_path / "missing.json")      # 读不到配置就不拦
+
+
 def test_read_embed_in_chunks(settings, monkeypatch):
     d = write_draft(settings)
     body = "# 标题\n\n" + "x" * 25
@@ -183,3 +200,31 @@ def test_manifest_merges_extension_ids(tmp_path):
     m2 = build_manifest(["bbb", "aaa"], exe, m1)
     assert m2["allowed_origins"] == ["chrome-extension://aaa/", "chrome-extension://bbb/"]
     assert m2["type"] == "stdio" and m2["path"] == str(exe) and m2["name"] == nh.HOST_NAME
+
+
+def test_install_host_on_macos_writes_manifest_into_each_browser_dir(tmp_path, monkeypatch):
+    exe = tmp_path / "ai-daily-host"
+    monkeypatch.setattr(host_install, "host_executable", lambda: exe)
+    master = tmp_path / "data" / "host.json"
+    for browser in ("Google/Chrome", "Microsoft Edge", "Doubao"):          # 装了的浏览器才有用户数据目录
+        (tmp_path / "Library/Application Support" / browser).mkdir(parents=True)
+    assert host_install.install(["abc"], list(host_install.BROWSERS), master, platform="darwin",
+                                home=tmp_path) == ["chrome", "edge", "doubao"]
+    assert (tmp_path / "Library/Application Support/Doubao/NativeMessagingHosts" / f"{nh.HOST_NAME}.json").is_file()
+    assert host_install.install(["abc"], ["doubao"], master, platform="linux", home=tmp_path) == []   # Linux 上没有豆包
+    host_install.install(["def"], ["chrome", "edge"], master, platform="darwin", home=tmp_path)
+    chrome = tmp_path / "Library/Application Support/Google/Chrome/NativeMessagingHosts" / f"{nh.HOST_NAME}.json"
+    edge = tmp_path / "Library/Application Support/Microsoft Edge/NativeMessagingHosts" / f"{nh.HOST_NAME}.json"
+    manifest = __import__("json").loads(chrome.read_text(encoding="utf-8"))
+    assert manifest["path"] == str(exe) and edge.read_text(encoding="utf-8") == chrome.read_text(encoding="utf-8")
+    assert manifest["allowed_origins"] == ["chrome-extension://abc/", "chrome-extension://def/"]
+    assert not (tmp_path / "Library/Application Support/Chromium").exists()
+    host_install.uninstall(["chrome", "edge", "chromium"], platform="darwin", home=tmp_path)
+    assert not chrome.exists() and not edge.exists()
+
+
+def test_extension_id_is_derived_from_the_unpacked_folder():
+    # 2026-09 那台 Windows 上 md 扩展的真实 ID
+    assert host_install.extension_id_for_path(r"D:\md\apps\web\.output\chrome-mv3", "win32") == "omlhhhbkjnjbnpgbomhdoeginlijonij"
+    assert host_install.extension_id_for_path("/Users/x/md/apps/web/.output/chrome-mv3", "darwin") \
+        != host_install.extension_id_for_path("/Users/x/md/apps/web/.output/chrome-mv3", "win32")

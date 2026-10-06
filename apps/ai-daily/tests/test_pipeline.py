@@ -95,13 +95,15 @@ def test_full_run_with_llm(http, settings):
     assert "- **工程师视角**：可以直接在 API 里试。" in md
     assert "> 原文：" in md
     assert "Qwen/Qwen-Image-2.1" not in md                      # 09-14 上传的模型上热门榜：旧闻，不收
-    credits = re.findall(r"\]\(images/2026-09-30_\w+_nowm\.png\)\n\n<p style=\"[^\"]*text-align: center[^\"]*\">图源：([^\n<]+)</p>", md)
+    # 图源接在图片下面第一段末尾的括号里，不单独一行
+    credits = re.findall(r"\]\(images/2026-09-30_\w+_nowm\.png\)\n\n[^\n]+（图源：([^\n（）]+)）\n", md)
     assert len(credits) >= 9                                     # 头条 + 10 条要闻，大部分有配图
     assert "X @OpenAI" in credits and "GitHub Trending" in credits   # 推文自带的图、仓库卡片都用上了
     # 头条里编造的那句原文被核对出来，其余条目的引用都能在原文里找到
     assert result.n_flags == 1 and "1 条原文句在来源里没找到" in md
     # 头条配图：官方博客的 og:image，存成 _nowm，不加水印
-    assert re.search(r"!\[中文标题\]\(images/2026-09-30_h_nowm\.png\)\n\n<p [^>]*>图源：OpenAI 官方博客</p>", md)
+    assert re.search(r"!\[中文标题\]\(images/2026-09-30_h_nowm\.png\)\n\n[^\n]+（图源：OpenAI 官方博客）\n", md)
+    assert "<p style=" not in md
     assert "关注**Hollis的多模态视觉大模型实战**：" in md               # 文末公众号名加粗
     assert (result.article.parent / "images" / "2026-09-30_h_nowm.png").is_file()
 
@@ -212,7 +214,7 @@ def test_preview_page_embeds_images_and_shows_draft_status(http, settings, tmp_p
     assert page.startswith("<title>AI 早报 09.30</title>")
     assert page.count("data:image/webp;base64,") == info["images"] >= 9      # 图片全部内嵌，不引用本地文件
     assert 'src="images/' not in page
-    assert page.count("<figcaption>图源：") == info["images"]           # 居中的 HTML 图源行也当作图注
+    assert page.count("（图源：") == info["images"] and "<figcaption>" not in page   # 图源在正文段落里
     assert "&lt;p style=" not in page
     assert '<li class="used">AI 早报 09.30｜GPT-6.1 Sol 价格降到五分之一</li>' in page   # 候选标题里标出正文在用的
     assert '<span class="cred official">官方</span>' in page and 'class="flag"' in page
@@ -239,3 +241,36 @@ def test_preview_page_embeds_images_and_shows_draft_status(http, settings, tmp_p
     checker = Balance()
     checker.feed(page)
     assert checker.stack == [] and checker.bad == []                        # 标签成对，结构没乱
+
+
+def test_new_machine_recovers_previous_issues_from_the_vault(settings, tmp_path):
+    """换电脑后库是空的：前几期写过的链接、标题、发布状态和生成时间从 vault 补回来，第二天不会重复选。"""
+    from datetime import datetime, timezone
+    from ai_daily import history
+    from ai_daily.pipeline import window_start
+    prev = DAY - timedelta(days=1)
+    month = settings.daily_dir / f"{prev:%Y-%m}"
+    month.mkdir(parents=True)
+    p = render.paths(month, prev)
+    p["article"].write_text("# AI 早报\n\n## 头条｜OpenAI 发布 GPT-6.1 Sol\n\n正文（[来源](https://openai.com/index/sol/)）\n",
+                            encoding="utf-8")
+    p["review"].write_text("## 本次运行\n\n- 生成时间：2026-09-29T07:05:00+08:00\n- 采集：1 条\n", encoding="utf-8")
+    store = Store(tmp_path / "fresh.db")
+    assert history.sync_from_vault(store, settings.daily_dir, DAY) == [prev]
+    assert "https://openai.com/index/sol" in {u.rstrip("/") for u in store.published_urls(DAY)}
+    assert any("GPT-6.1 Sol" in t for t in store.recent_titles(DAY))
+    assert not store.has_published(prev)
+    assert store.previous_run(DAY) == datetime(2026, 9, 28, 23, 5, tzinfo=timezone.utc)
+    since = window_start(store, {"window": {"min_hours": 12, "max_hours": 72}}, NOW, DAY)
+    assert since == datetime(2026, 9, 28, 21, 5, tzinfo=timezone.utc)      # 上一期生成时间再早 2 小时
+    p["article"].with_name(f"{p['stem']}{render.EMBED_SUFFIX}.md").write_text("x", encoding="utf-8")
+    history.sync_from_vault(store, settings.daily_dir, DAY)
+    assert store.has_published(prev)
+    store.close()
+
+
+def test_review_records_when_the_issue_was_generated(http, settings):
+    run(settings, SOURCES, day=DAY, now=NOW, http=http, llm=scripted(), images=False, cover=False)
+    review = render.paths(settings.daily_dir / "2026-09", DAY)["review"].read_text(encoding="utf-8")
+    from datetime import datetime
+    assert datetime.fromisoformat(render.GENERATED.search(review).group(1)) == NOW

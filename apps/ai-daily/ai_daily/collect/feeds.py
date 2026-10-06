@@ -10,6 +10,7 @@ from ..models import Item
 from ..net import get
 from ..textutil import clip, html_to_text, matches_keywords
 
+MEDIA_HOSTS = ("redd.it",)          # Reddit 的图片、视频、预览图床，不是原文
 TWEET = re.compile(r"^https?://(?:x|twitter)\.com/([^/?#]+)/status/\d+")
 
 
@@ -62,7 +63,7 @@ def collect_feed(http, spec: dict, since: datetime, keywords=(), official_handle
             title = f"{spec['name']} {title}"
         url, name, meta = e.get("link", ""), spec["name"], {"text": clip(text, 8000)}
         original = _original_link(_entry_html(e), url) if spec.get("follow_original") else None
-        if original:          # 聚合站（Techmeme）只当发现渠道：链接和信源名换成原文，抓原文时再换成网站名
+        if original:          # 聚合站（Techmeme）、Reddit 链接帖只当发现渠道：链接和信源名换成原文，抓原文时再换成网站名
             url, name = original, _lead_name(original, spec["name"])
             meta.update(via=spec["name"], via_url=e.get("link", ""))
         items.append(Item(source=spec["key"], source_name=name, kind=spec["kind"], title=title,
@@ -77,12 +78,15 @@ def collect_feed(http, spec: dict, since: datetime, keywords=(), official_handle
 
 
 def _original_link(html: str, own: str) -> str | None:
-    """聚合站条目摘要里第一条指向别的网站文章的链接（跳过聚合站自己的链接和只有域名的首页链接）。"""
+    """聚合站条目摘要里第一条指向别的网站文章的链接（跳过聚合站自己的链接和只有域名的首页链接）。
+    Reddit 链接帖的 [link] 指向原文；自发帖的 [link] 是帖子本身，图片、视频帖指向 i.redd.it / v.redd.it，都不算原文。"""
     own_host = (urlsplit(own).hostname or "").removeprefix("www.")
     for a in BeautifulSoup(html or "", "lxml").find_all("a", href=True):
         parts = urlsplit(a["href"])
-        if parts.scheme in ("http", "https") and (parts.hostname or "").removeprefix("www.") != own_host \
-                and parts.path.strip("/"):
+        host = (parts.hostname or "").removeprefix("www.")
+        if host == own_host or host.endswith("." + own_host) or host.endswith(MEDIA_HOSTS):
+            continue
+        if parts.scheme in ("http", "https") and parts.path.strip("/"):
             return a["href"]
     return None
 

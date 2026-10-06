@@ -6,7 +6,7 @@ import logging
 import re
 from collections import Counter
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from .classify import guess_track, heuristic_score
 from .models import LABELS, TRACKS, Event, Item, pick_primary
@@ -134,12 +134,38 @@ def llm_events(llm, items: list[Item], day: date, recent: list[str], *, now: dat
     return events
 
 
+_URL_DATE = re.compile(r"/(20\d\d)/(\d{1,2}|[A-Za-z]{3})/(\d{1,2})(?:/|$)")
+_MONTHS = {m: i for i, m in enumerate("jan feb mar apr may jun jul aug sep oct nov dec".split(), 1)}
+
+
+def url_latest(url: str) -> datetime | None:
+    """链接里的发布日期（techcrunch.com/2026/09/29/…、/2026/oct/03/…）最晚对应的时刻：
+    按最西的时区（UTC-12）算到当天结束，即 UTC 次日 12:00。没有日期返回 None。"""
+    m = _URL_DATE.search(url)
+    if not m:
+        return None
+    month = int(m.group(2)) if m.group(2).isdigit() else _MONTHS.get(m.group(2).lower())
+    try:
+        day = datetime(int(m.group(1)), month or 0, int(m.group(3)), tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return day + timedelta(hours=36)
+
+
+def _published(it: Item) -> datetime | None:
+    """来源的发布时间。Techmeme 这类聚合源给的是它转发的时间，链接里的日期更早时以链接为准。"""
+    by_url = url_latest(it.url)
+    if it.published and by_url:
+        return min(it.published, by_url)
+    return it.published
+
+
 def drop_stale(events: list[Event], since: datetime) -> list[Event]:
     """所有带时间的来源都早于窗口的事件是旧闻（例如上周发布、今天被转述），丢掉；
     有一个来源在窗口内、或来源不带时间（热门榜、投喂）的保留。"""
     keep = []
     for ev in events:
-        dated = [it.published for it in ev.items if it.published]
+        dated = [_published(it) for it in ev.items if _published(it)]
         if dated and len(dated) == len(ev.items) and max(dated) < since:
             log.info("旧闻不收：%s（最新来源 %s）", ev.title, _when(max(dated)))
             continue

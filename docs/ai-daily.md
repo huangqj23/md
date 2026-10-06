@@ -6,14 +6,17 @@
 
 ## 第一次使用
 
-1. 在 `apps/ai-daily` 目录装好环境（见 [ai-daily 的 README](../apps/ai-daily/README.md#安装)），`pip install -e .` 会生成 `.venv\Scripts\ai-daily-host.exe`。
-2. 打开扩展编辑器，点顶部「AI 早报」（或「文件 → AI 早报」），点「授权」。授权的是可选权限 `nativeMessaging`，安装或升级扩展时不会多要权限。
-3. 面板会提示“还没有连接本机的 ai-daily”，并给出带本扩展 ID 的命令。在 ai-daily 目录运行它：
-   ```powershell
-   .venv\Scripts\ai-daily install-host --extension-id <面板里显示的 ID>
-   ```
-   命令会写 `HKCU\Software\{Google\Chrome, Microsoft\Edge, Chromium}\NativeMessagingHosts\com.hollis23.ai_daily`（不需要管理员）。开发版和打包版 ID 不同时，两个 ID 都注册一次即可（会合并）。
-4. 回面板点「重新检测」。
+1. 在 `apps/ai-daily` 目录装好环境（见 [ai-daily 的 README](../apps/ai-daily/README.md#安装)），`pip install -e .` 会生成 `ai-daily-host`（Windows 在 `.venv\Scripts\`，macOS / Linux 在 `.venv/bin/`）。
+2. 构建扩展（`corepack pnpm --filter @md/web ext:zip`），然后在 ai-daily 目录运行一次 `install-host`（Windows 是 `.venv\Scripts\ai-daily install-host`，macOS 是 `.venv/bin/ai-daily install-host`）。不带参数时，它按 `apps/web/.output/chrome-mv3` 的路径算出“加载已解压的扩展程序”后的扩展 ID（Windows 按 UTF-16LE、其他系统按 UTF-8 对路径取 SHA-256），不用先去面板里抄 ID。登记方式：
+
+   - Windows：写 `HKCU\Software\{Google\Chrome, Microsoft\Edge, Chromium}\NativeMessagingHosts\com.hollis23.ai_daily`（不需要管理员）；
+   - macOS / Linux：把 manifest 写进各浏览器的 `NativeMessagingHosts/` 目录，没装的浏览器跳过。macOS 上还包括豆包桌面版的内置浏览器（`~/Library/Application Support/Doubao/NativeMessagingHosts/`）。
+
+   这一步只能在终端里做：Chrome 不允许扩展自己登记本机程序。
+
+3. 在浏览器扩展页面加载 `apps/web/.output/chrome-mv3`，打开扩展编辑器，点顶部「AI 早报」（或「文件 → AI 早报」）。`nativeMessaging` 是 Chrome / Edge 版的必需权限（2026-10-02 起；以前是可选权限，要在面板里点「授权」），加载扩展时就有了，不用再授权。旧版扩展升级上来时面板仍会显示「授权」按钮，点一下即可。
+4. 在「模型设置」里填 key，面板显示“已就绪”就可以生成了。
+5. 从别的目录加载、或者开发版和打包版 ID 不同时，面板会提示“还没有连接本机的 ai-daily”，并给出带本扩展 ID 的命令（`install-host --extension-id <ID>`），运行后点「重新检测」。多个 ID 会合并到同一个 manifest。
 
 ## 每天的流程
 
@@ -25,7 +28,7 @@
 | 载入编辑器 | 「载入编辑器」                       | 把内嵌版读进编辑器；同一天再次载入会更新同一篇文章，不会新建                                                                                              |
 | 发布       | 顶部「发布」                         | 已有的多平台发布，公众号会自动上传内嵌图片                                                                                                                |
 
-投喂：在面板的「手动投喂」里贴链接，或在任意网页 / 链接上右键「投喂到 AI 早报」（授权后才出现）；工具栏图标闪 ✓ 表示已写进 `AI_Daily/_inbox.md`，闪 ! 表示本机 host 没连上。
+投喂：在面板的「手动投喂」里贴链接，或在任意网页 / 链接上右键「投喂到 AI 早报」；工具栏图标闪 ✓ 表示已写进 `AI_Daily/_inbox.md`，闪 ! 表示本机 host 没连上。
 
 ## 模型设置
 
@@ -34,7 +37,7 @@
 - **用哪个模型**：选题、写稿分别选厂商和模型（模型名可下拉选择，也可以直接输入）。
 - **厂商与 key**：预置 DeepSeek、通义千问、Kimi、智谱、MiniMax、豆包、硅基流动、OpenRouter、OpenAI、Gemini、xAI、Claude、Ollama / 本机或内网服务；也可以「添加 OpenAI 兼容接口」（自建 vLLM、代理等，http 只允许本机或内网地址）。
 - **测试连接**：用当前填的 key（可以还没保存）拉取模型列表，并用选定模型做一次最小的调用；拉到的模型会加进下拉列表。
-- **key 的去向**：key 经 native host 写到 ai-daily 的 `data/llm.json`，用 Windows DPAPI 加密。扩展只写入、不回读明文（面板上只显示 `sk-…a1b2`），`chrome.storage` 和云同步里都没有 key。计划任务不开浏览器也能用同一份配置。
+- **key 的去向**：key 经 native host 写到 ai-daily 的 `data/llm.json`：Windows 上用 DPAPI 加密，macOS 上存进登录钥匙串（条目 `hollis23-ai-daily`，`llm.json` 里只记条目名）。扩展只写入、不回读明文（面板上只显示 `sk-…a1b2`），`chrome.storage` 和云同步里都没有 key。计划任务不开浏览器也能用同一份配置。
 
 ## 协议
 

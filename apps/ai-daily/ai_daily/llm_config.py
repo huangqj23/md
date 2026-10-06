@@ -1,7 +1,7 @@
 """模型配置 data/llm.json：浏览器面板（经 native host）写，流水线和计划任务读。
 
 - 每个厂商一条：预置厂商可以改地址（留空恢复默认）；自定义厂商是任意 OpenAI 兼容接口。
-- API key 用 DPAPI 加密落盘；对外（面板）只给首尾几位，不回传明文。
+- API key 加密落盘（Windows DPAPI / macOS 钥匙串，见 secrets.py）；对外（面板）只给首尾几位，不回传明文。
 - 两个角色（选题 / 写稿）分别指定厂商 + 模型。
 - 没有 llm.json 时回退到 .env 的 LLM_*（旧配置照常可用）。
 """
@@ -245,7 +245,7 @@ def public_view(settings) -> dict:
         pid = r.get("provider") or DEFAULT_PROVIDER
         info = provider_info(raw, pid) or {}
         roles[role] = {"provider": pid, "model": r.get("model") or info.get(role, "")}
-    return {"source": source, "encryption": "dpapi" if secrets.available() else "plain",
+    return {"source": source, "encryption": secrets.scheme(),
             "providers": providers, "roles": roles, "readiness": readiness(settings)}
 
 
@@ -275,12 +275,14 @@ def apply_update(settings, update: dict) -> dict:
             raise ValueError(f"未知厂商：{pid}")
         entry = providers[pid]
         if p.get("clear_key"):
-            entry.pop("api_key", None)
+            secrets.discard(entry.pop("api_key", None))
         elif p.get("api_key"):
-            entry["api_key"] = secrets.seal(_validate_key(str(p["api_key"])))
+            new_key = secrets.seal(_validate_key(str(p["api_key"])))
+            secrets.discard(entry.get("api_key"))
+            entry["api_key"] = new_key
     for pid in update.get("remove") or []:
         if (providers.get(pid) or {}).get("custom"):
-            del providers[pid]
+            secrets.discard(providers.pop(pid).get("api_key"))
     roles = raw.setdefault("roles", {})
     for role, r in (update.get("roles") or {}).items():
         if role not in ROLES:

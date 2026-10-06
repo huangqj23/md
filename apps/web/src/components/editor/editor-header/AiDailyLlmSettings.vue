@@ -312,7 +312,7 @@ async function removeCustom() {
         {{ t('aiDaily.llm.sourceEnv') }}
       </p>
       <p class="text-muted-foreground">
-        {{ llm.encryption === 'dpapi' ? t('aiDaily.llm.storageDpapi') : t('aiDaily.llm.storagePlain') }}
+        {{ t(llm.encryption === 'dpapi' ? 'aiDaily.llm.storageDpapi' : llm.encryption === 'keychain' ? 'aiDaily.llm.storageKeychain' : 'aiDaily.llm.storagePlain') }}
       </p>
     </section>
 

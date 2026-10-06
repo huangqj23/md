@@ -8,6 +8,7 @@ import json
 import os
 import re
 import struct
+import subprocess
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -24,7 +25,7 @@ CHUNK_CHARS = 200_000          # 单条回复上限 1 MB（Chrome 限制），�
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 FLAG = re.compile(r"【待核对：([^】]*)】")
 SECTION = re.compile(r"^(?:##\s+(头条)｜(.+)|###\s+\d+\.\s+(.+)|##\s+(.+))$")
-EMBED_SUFFIX = "_内嵌图片版"
+EMBED_SUFFIX = render.EMBED_SUFFIX
 
 
 def read_message(stream) -> dict | None:
@@ -140,6 +141,35 @@ def obsidian_uri(vault: Path, target: Path) -> str:
     return f"obsidian://open?vault={quote(vault.name)}&file={quote(rel)}"
 
 
+def obsidian_config(platform: str = sys.platform, home: Path | None = None) -> Path:
+    """Obsidian 记录已打开仓库的文件（obsidian.json）。"""
+    home = home or Path.home()
+    if platform == "win32":
+        return Path(os.environ.get("APPDATA", home / "AppData" / "Roaming")) / "obsidian" / "obsidian.json"
+    if platform == "darwin":
+        return home / "Library" / "Application Support" / "obsidian" / "obsidian.json"
+    return home / ".config" / "obsidian" / "obsidian.json"
+
+
+def vault_known_to_obsidian(vault: Path, config: Path) -> bool:
+    """obsidian.json 里有没有这个仓库。读不到这个文件（没装 Obsidian、格式变了）时不拦，照常打开。"""
+    try:
+        vaults = json.loads(config.read_text(encoding="utf-8")).get("vaults", {})
+    except (OSError, ValueError, AttributeError):
+        return True
+    want = os.path.normcase(str(vault.resolve()))
+    return any(os.path.normcase(str(Path(v.get("path", "")).resolve())) == want for v in vaults.values())
+
+
+def open_external(uri: str) -> None:
+    """交给系统打开 Obsidian，浏览器不会弹“是否打开外部应用”。"""
+    if sys.platform == "win32":
+        os.startfile(uri)
+    else:
+        subprocess.run(["open" if sys.platform == "darwin" else "xdg-open", uri], check=True,
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+
+
 def cmd_open(settings, msg) -> dict:
     which = msg.get("which", "article")
     if which == "inbox":
@@ -153,7 +183,10 @@ def cmd_open(settings, msg) -> dict:
     uri = obsidian_uri(settings.vault, target)
     if msg.get("dry_run"):
         return {"uri": uri}
-    os.startfile(uri)       # 交给系统打开 Obsidian，浏览器不会弹“是否打开外部应用”
+    if not vault_known_to_obsidian(settings.vault, obsidian_config()):
+        # obsidian:// 按仓库名找仓库；Obsidian 没打开过这个文件夹时，链接会落到别的仓库或报找不到
+        raise ValueError(f"Obsidian 还没有打开过这个仓库：{settings.vault}。在 Obsidian 里点“打开本地仓库”选这个文件夹，之后再点")
+    open_external(uri)
     return {"uri": uri}
 
 

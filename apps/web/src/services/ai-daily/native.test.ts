@@ -1,6 +1,6 @@
 import type { AiDailyError, NativeExtension } from './native'
 import { describe, expect, it, vi } from 'vitest'
-import { AI_DAILY_HOST, callHost, classifyNativeError, hasNativePermission, installCommand, isAiDailyDeclared, localDate, readEmbed, requestNativePermission, resolveLoadTarget } from './native'
+import { AI_DAILY_HOST, callHost, classifyNativeError, hasNativePermission, installCommand, isAiDailyDeclared, isWindows, localDate, readEmbed, requestNativePermission, resolveLoadTarget } from './native'
 
 function ext(send?: (host: string, message: any) => Promise<unknown>, declared = true): NativeExtension {
   return {
@@ -81,7 +81,10 @@ describe(`helpers`, () => {
 
   it(`formats the local date and the install command`, () => {
     expect(localDate(new Date(2026, 8, 3, 23, 59))).toBe(`2026-09-03`)
-    expect(installCommand(`abc`)).toBe(`.venv\\Scripts\\ai-daily install-host --extension-id abc`)
+    expect(installCommand(`abc`, true)).toBe(`.venv\\Scripts\\ai-daily install-host --extension-id abc`)
+    expect(installCommand(`abc`, false)).toBe(`.venv/bin/ai-daily install-host --extension-id abc`)
+    expect(isWindows(`Mozilla/5.0 (Windows NT 10.0; Win64; x64)`)).toBe(true)
+    expect(isWindows(`Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)`)).toBe(false)
   })
 })
 

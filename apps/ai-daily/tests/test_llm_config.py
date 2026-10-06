@@ -5,11 +5,41 @@ import pytest
 
 from ai_daily import llm_config as lc
 from ai_daily import native_host as nh
+from ai_daily import secrets
 from ai_daily.config import Settings
 from ai_daily.llm import OpenAICompatLLM
 from ai_daily.llm_anthropic import AnthropicLLM
 
 KEY = "sk-live-0123456789abcdef"
+
+
+class FakeKeychain:
+    """代替 macOS 的 security 命令，测试不碰真的登录钥匙串。记下每次调用的命令行，用来检查 key 不在命令行里。"""
+
+    def __init__(self):
+        self.items, self.argv = {}, []
+
+    def __call__(self, args, stdin=None):
+        self.argv.append(args)
+        if args == ["-i"]:
+            parts = stdin.split()
+            account, secret = parts[parts.index("-a") + 1], parts[parts.index("-w") + 1].strip('"')
+            self.items[account] = secret
+            return ""
+        account = args[args.index("-a") + 1]
+        if args[0] == "find-generic-password":
+            if account not in self.items:
+                raise OSError(44, "not found")
+            return self.items[account] + "\n"
+        self.items.pop(account, None)
+        return ""
+
+
+@pytest.fixture(autouse=True)
+def keychain(monkeypatch):
+    fake = FakeKeychain()
+    monkeypatch.setattr(secrets, "_security", fake)
+    return fake
 
 
 @pytest.fixture
@@ -25,7 +55,7 @@ def provider(view, pid):
 
 def test_empty_config_lists_presets_and_is_not_ready(settings):
     view = lc.public_view(settings)
-    assert view["source"] == "none" and view["encryption"] == "dpapi"
+    assert view["source"] == "none" and view["encryption"] == secrets.scheme()
     ids = [p["id"] for p in view["providers"]]
     assert ids[:3] == ["deepseek", "qwen", "kimi"] and "anthropic" in ids and "ollama" in ids
     assert view["roles"] == {"triage": {"provider": "deepseek", "model": "deepseek-flash"},
@@ -37,13 +67,28 @@ def test_empty_config_lists_presets_and_is_not_ready(settings):
 def test_saving_a_key_encrypts_it_and_never_returns_it(settings):
     view = lc.apply_update(settings, {"providers": [{"id": "deepseek", "api_key": f"  {KEY}  "}]})
     raw_text = lc.config_path(settings).read_text(encoding="utf-8")
-    assert KEY not in raw_text and '"dpapi"' in raw_text
+    assert KEY not in raw_text and f'"{secrets.scheme()}"' in raw_text
     assert KEY not in json.dumps(view, ensure_ascii=False)
     assert provider(view, "deepseek")["has_key"] and provider(view, "deepseek")["key_hint"] == "sk-…cdef"
     assert view["readiness"] == {"source": "file", "ready": True, "problems": [],
                                  "triage": "DeepSeek · deepseek-flash", "write": "DeepSeek · deepseek-v4-pro"}
     raw, _ = lc.load(settings)
     assert lc.stored_key(raw, "deepseek") == KEY
+
+
+def test_keychain_keeps_key_off_the_command_line_and_cleans_up(settings, keychain, monkeypatch):
+    monkeypatch.setattr(secrets, "scheme", lambda: "keychain")
+    view = lc.apply_update(settings, {"providers": [{"id": "deepseek", "api_key": KEY}]})
+    assert view["encryption"] == "keychain"
+    raw, _ = lc.load(settings)
+    assert set(raw["providers"]["deepseek"]["api_key"]) == {"keychain"} and lc.stored_key(raw, "deepseek") == KEY
+    assert all(KEY not in " ".join(argv) for argv in keychain.argv) and list(keychain.items.values()) == [KEY]
+    lc.apply_update(settings, {"providers": [{"id": "deepseek", "api_key": KEY + "x"}]})
+    assert list(keychain.items.values()) == [KEY + "x"]          # 换 key：旧条目删掉
+    lc.apply_update(settings, {"providers": [{"id": "deepseek", "clear_key": True}]})
+    assert keychain.items == {}
+    with pytest.raises(ValueError):
+        secrets.seal('sk-"quoted"')
 
 
 def test_key_is_kept_unless_replaced_or_cleared(settings):

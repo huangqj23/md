@@ -48,9 +48,6 @@ function getApiHostPermissions(mode: string): string[] {
 function getPublishPermissions(browser: string, manifestVersion: 2 | 3) {
   const hosts = [...new Set(PUBLISH_PLATFORMS.flatMap(platform => platform.hostPermissions))]
   const apis: string[] = PUBLISH_API_PERMISSIONS.filter(permission => permission !== `tabGroups` || browser === `chrome` || browser === `edge`)
-  // The AI daily panel talks to the local ai-daily program; its native host is only registered for Chromium browsers.
-  if (browser !== `firefox`)
-    apis.push(NATIVE_PERMISSION)
   return manifestVersion === 2
     ? { optional_permissions: [...apis, ...hosts] }
     : { optional_permissions: [...apis], optional_host_permissions: hosts }
@@ -65,7 +62,9 @@ export default defineConfig({
     icons: {
       256: mode === `development` ? `/mpmd/icon-256-gray.png` : `/mpmd/icon-256.png`,
     },
-    permissions: [`storage`, `activeTab`, `sidePanel`, `contextMenus`, `identity`],
+    // The AI daily panel talks to the local ai-daily program; its native host is only registered for Chromium browsers.
+    // nativeMessaging is required (granted at load) rather than optional, so the panel needs no extra "authorize" click.
+    permissions: [`storage`, `activeTab`, `sidePanel`, `contextMenus`, `identity`, ...(browser === `firefox` ? [] : [NATIVE_PERMISSION])],
     host_permissions: [
       ...getApiHostPermissions(mode),
       `https://*.github.com/*`,

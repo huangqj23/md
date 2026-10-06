@@ -136,6 +136,9 @@ class Store:
         self.db.executemany("INSERT OR IGNORE INTO drafted_titles VALUES (?, ?)", [(d, t) for t in titles])
         self.db.commit()
 
+    def has_last_run(self, day: date) -> bool:
+        return self.get_meta(f"last_run:{day.isoformat()}") is not None
+
     def has_published(self, day: date) -> bool:
         return self.db.execute("SELECT 1 FROM published WHERE day = ? LIMIT 1", (day.isoformat(),)).fetchone() is not None
 

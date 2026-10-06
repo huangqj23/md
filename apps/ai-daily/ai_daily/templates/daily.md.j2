@@ -6,7 +6,16 @@
 {% if ev.image_path %}
 ![{{ ev.display_title }}]({{ ev.image_path }})
 
-<p style="{{ credit_style }}">{{ ev.image_credit | e }}</p>
+{% endif %}
+{% endmacro %}
+{# 图源接在图片下面第一段的末尾，放在括号里，不单独一行（用户 2026-10-04 要求） #}
+{% macro body(ev) %}
+{% for p in ev.paragraphs %}
+{{ p }}{% if loop.first and ev.image_path and ev.image_credit %}（{{ ev.image_credit }}）{% endif %}
+
+{% endfor %}
+{% if ev.image_path and ev.image_credit and not ev.paragraphs %}
+（{{ ev.image_credit }}）
 
 {% endif %}
 {% endmacro %}
@@ -41,10 +50,7 @@
 {{ badge(headline) }}
 
 {{ figure(headline) }}
-{% for p in headline.paragraphs %}
-{{ p }}
-
-{% endfor %}
+{{ body(headline) }}
 {{ details(headline, with_note=False) }}
 **我的看法**：【我的看法：待写】
 
@@ -57,10 +63,7 @@
 {{ badge(ev) }}
 
 {{ figure(ev) }}
-{% for p in ev.paragraphs %}
-{{ p }}
-
-{% endfor %}
+{{ body(ev) }}
 {{ details(ev) }}
 {% endfor %}
 {% endif %}

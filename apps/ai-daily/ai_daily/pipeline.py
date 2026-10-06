@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from . import publish, render, triage
+from . import history, publish, render, triage
 from .classify import heuristic_events
 from .collect import collect_all
 from .collect.inbox import INBOX_HEADER
@@ -150,6 +150,7 @@ def run(settings: Settings, sources: dict, *, day: date, now: datetime, http, ll
     store = Store(db_path or settings.db_path)
     try:
         ensure_inbox(settings.inbox)
+        history.sync_from_vault(store, settings.daily_dir, day)
         since = window_start(store, sources, now, day)
         # 以前的运行见过、发布在窗口前的：给选题识别旧闻。忙的时候 36 小时有两三百条，200 条会把最早的发布截掉
         before = store.seen_before(since, limit=400)
@@ -195,7 +196,8 @@ def run(settings: Settings, sources: dict, *, day: date, now: datetime, http, ll
         usage = "未使用（--no-llm）" if llm is None else llm.usage_summary()
         review_md = render.render_review(day, p["stem"], layout, editor, article_md, stats=stats,
                                          n_items=len(fresh), n_candidates=len(candidates), n_events=len(events),
-                                         llm_usage=usage or "0")
+                                         llm_usage=usage or "0",
+                                         generated=now.astimezone().isoformat(timespec="seconds"))
         out_dir.mkdir(parents=True, exist_ok=True)
         p["article"].write_text(article_md, encoding="utf-8")
         p["review"].write_text(review_md, encoding="utf-8")

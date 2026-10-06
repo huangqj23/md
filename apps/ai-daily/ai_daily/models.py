@@ -115,7 +115,8 @@ def _rank(it: Item, hint: str) -> int:
     if it.meta.get("via") and hint:
         parts = (urlsplit(it.url).hostname or "").lower().split(".")
         site = parts[-2] if len(parts) >= 2 else ""
-        if len(site) >= 3 and site in hint.lower():
+        # aleph-alpha.com 之于“Aleph Alpha 开源 Kolibri”：去掉连字符、空格再比
+        if len(site) >= 3 and site.replace("-", "") in re.sub(r"[^a-z0-9]", "", hint.lower()):
             label = "官方"
     return LABELS.index(label) if label in LABELS else len(LABELS)
 

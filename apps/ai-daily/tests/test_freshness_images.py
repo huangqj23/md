@@ -255,3 +255,19 @@ def test_recent_titles_include_original_titles_of_drafted_links(tmp_path):
     recent = store.recent_titles(date(2026, 10, 2))
     assert recent == ["2026-09-30 NVIDIA 发布表格预测模型", "2026-09-30 原文标题：Kumo Tabular: a tabular foundation model"]
     store.close()
+
+
+def test_aggregator_reposts_of_older_articles_are_stale():
+    """2026-10-04：Techmeme 10-03 才转发的 TechCrunch 09-29 融资新闻，按转发时间算混进了正文。"""
+    from datetime import datetime, timezone
+    since = datetime(2026, 10, 2, 21, 32, tzinfo=timezone.utc)          # 北京时间 10-03 05:32
+    posted = datetime(2026, 10, 3, 5, 11, tzinfo=timezone.utc)
+    events = [
+        _event(_item("reco", "media", posted, url="https://techcrunch.com/2026/09/29/reco-raises-55m/"), title="Reco"),
+        _event(_item("simon", "media", posted, url="https://simonwillison.net/2026/Oct/1/caps/"), title="前天"),
+        _event(_item("bob", "media", posted, url="https://www.marktechpost.com/2026/10/02/ibm-bob/"), title="美国昨天"),
+        _event(_item("g", "media", posted, url="https://www.theguardian.com/technology/2026/oct/03/x"), title="今天"),
+        _event(_item("plain", "media", posted, url="https://e.com/news/123"), title="链接无日期"),
+    ]
+    assert [e.title for e in drop_stale(events, since)] == ["美国昨天", "今天", "链接无日期"]
+    assert triage.url_latest("https://e.com/2026/13/40/x") is None
