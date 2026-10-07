@@ -12,6 +12,17 @@ from ..textutil import clip, html_to_text, matches_keywords
 
 MEDIA_HOSTS = ("redd.it",)          # Reddit 的图片、视频、预览图床，不是原文
 TWEET = re.compile(r"^https?://(?:x|twitter)\.com/([^/?#]+)/status/\d+")
+TWEET_ID = re.compile(r"/status/(\d+)")
+# AINews 一期大致覆盖前一天；早于当期这么多小时的推文是旧事重提（10-07 混进过 10-04 的推文）
+AINEWS_TWEET_MAX_AGE_H = 30
+
+
+def tweet_time(url: str) -> datetime | None:
+    """推文 id 是 snowflake：高位是自 2010-11-04 起的毫秒数，可以直接算出发推时间。"""
+    m = TWEET_ID.search(url)
+    if not m or not TWEET.match(url):
+        return None
+    return datetime.fromtimestamp(((int(m.group(1)) >> 22) + 1288834974657) / 1000, timezone.utc)
 
 
 def _entry_time(e) -> datetime | None:
@@ -130,6 +141,9 @@ def parse_ainews(entry, spec: dict, when: datetime, official_handles=()) -> list
             continue                                # 没有链接的是上一条的细节子项，内容已经在上一条里
         tweets = [h for h in links if TWEET.match(h)]
         url = (tweets or links)[0]
+        posted = tweet_time(url)
+        if posted and (when - posted).total_seconds() > AINEWS_TWEET_MAX_AGE_H * 3600:
+            continue
         m = TWEET.match(url)
         label = "官方" if m and m.group(1).lower() in official else "社区"
         items.append(Item(source=spec["key"], source_name=_lead_name(url, spec["name"]), kind="social",

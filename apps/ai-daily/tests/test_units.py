@@ -14,6 +14,14 @@ def test_canonical_url_drops_tracking_and_unifies_x():
         Item("s", "S", "official", "t", "https://mobile.twitter.com/a/status/1?s=46").id
 
 
+def test_trailing_backslash_is_dropped():
+    # 2026-10-07：HN 上的 Mistral Large 4 提交链接是 mistral-large-4/\，被选成头条主来源后 404
+    hn = Item("hn", "HN", "community", "t", "https://mistral.ai/news/mistral-large-4/\\")
+    assert hn.url == "https://mistral.ai/news/mistral-large-4/"
+    assert hn.id == Item("mistral", "M", "official", "t", "https://mistral.ai/news/mistral-large-4").id
+    assert canonical_url("https://e.com/p\\") == "https://e.com/p"
+
+
 def test_keywords_short_words_match_whole_words_only():
     kw = compile_keywords(["ai", "agent", "gpu", "大模型"])
     assert matches_keywords("New AI-generated maths", kw)
@@ -203,3 +211,14 @@ def test_hn_lead_to_a_hyphenated_company_site_counts_as_official():
                   "Aleph-Alpha/Kolibri-1 · Hugging Face - 78B parameters. 3.46B active",
                   "https://www.reddit.com/r/LocalLLaMA/comments/1wwl7y6/x/")
     assert pick_primary([reddit, blog], "Aleph Alpha 开源 78B MoE 模型 Kolibri") is blog
+
+
+def test_display_links_drop_tracking_params_but_keep_share_codes():
+    """2026-10-06：快讯链接带着 ?utm_source=tldrai；Atlantic 的 gift 分享码要留着，读者才能看全文。"""
+    from ai_daily.models import strip_tracking
+    assert Item("s", "S", "media", "t", "https://cactuscompute.com/blog/whistle?utm_source=tldrai").url \
+        == "https://cactuscompute.com/blog/whistle"
+    assert strip_tracking("https://www.theatlantic.com/a/688881/?gift=abc&utm_source=copy-link&utm_medium=social") \
+        == "https://www.theatlantic.com/a/688881/?gift=abc"
+    assert strip_tracking("https://e.com/p?id=1&ref=hn#sec") == "https://e.com/p?id=1#sec"
+    assert strip_tracking("https://e.com/p?id=1") == "https://e.com/p?id=1"     # 没有跟踪参数：原样返回

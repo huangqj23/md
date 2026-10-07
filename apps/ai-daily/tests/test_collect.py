@@ -44,6 +44,21 @@ def test_ainews_splits_twitter_recap_into_x_leads(http):
     assert dots.meta["topic"].startswith("OpenAI DevDay 2026")
 
 
+def test_ainews_drops_tweets_posted_days_before_the_issue():
+    # 2026-10-07：10-06 那期 AINews 里有一条 10-04 的推文（GPT-6 提速），进了快讯
+    assert feeds.tweet_time("https://x.com/kimmonismus/status/2106726110868234553") \
+        == datetime(2026, 10, 4, 12, 40, 20, 566000, tzinfo=timezone.utc)
+    assert feeds.tweet_time("https://github.com/a/b") is None
+    html = ("<h1>AI Twitter Recap</h1><p>Agents</p><ul>"
+            "<li><strong>Old</strong> <a href='https://x.com/kimmonismus/status/2106726110868234553'>t</a></li>"
+            "<li><strong>New</strong> <a href='https://x.com/cursor_ai/status/2107141004482793827'>t</a></li>"
+            "<li><strong>Blog</strong> <a href='https://example.com/post'>b</a></li></ul>")
+    entry = {"title": "[AINews] Mistral Large 4", "link": "https://news.smol.ai/issues/26-10-06",
+             "content": [{"value": html}]}
+    items = feeds.parse_ainews(entry, {"key": "ainews", "name": "AINews"}, datetime(2026, 10, 6, 6, 28, tzinfo=timezone.utc))
+    assert [it.title for it in items if it.kind == "social"] == ["New", "Blog"]   # 10-05 晚的推文和非推文链接留着
+
+
 def test_hf_daily_papers_sorted_by_upvotes(http):
     items = hf.daily_papers(http, {"daily_papers_limit": 3})
     assert [it.meta["upvotes"] for it in items] == [8, 5, 1]

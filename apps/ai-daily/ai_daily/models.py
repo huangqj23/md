@@ -21,15 +21,31 @@ KIND_LABEL = {
 _DROP_PARAMS = {"ref", "ref_src", "fbclid", "gclid", "spm", "mc_cid", "mc_eid"}
 
 
+def _tracking(key: str) -> bool:
+    return key.lower().startswith("utm_") or key.lower() in _DROP_PARAMS
+
+
+def strip_tracking(url: str) -> str:
+    """去掉显示用链接里的跟踪参数（utm_*、ref 等），别的参数（如 Atlantic 的 gift 分享码）和写法保持原样。"""
+    parts = urlsplit(url)
+    if not parts.query:
+        return url
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    kept = [(k, v) for k, v in pairs if not _tracking(k)]
+    if len(kept) == len(pairs):
+        return url
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment))
+
+
 def canonical_url(url: str) -> str:
     """去掉跟踪参数、锚点和末尾斜杠，统一 https 和 twitter.com → x.com，用来去重。"""
-    parts = urlsplit(url.strip())
+    parts = urlsplit(url.strip().rstrip("\\"))
     host = parts.netloc.lower().removeprefix("www.").removeprefix("mobile.")
     if host in ("twitter.com", "x.com"):
         host, query = "x.com", ""          # 推文链接上的 ?s=20&t=… 全是跟踪参数
     else:
         query = urlencode([(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
-                           if not k.lower().startswith("utm_") and k.lower() not in _DROP_PARAMS])
+                           if not _tracking(k)])
     path = parts.path.rstrip("/") or "/"
     return urlunsplit(("https", host, path, query, ""))
 
@@ -50,7 +66,8 @@ class Item:
     meta: dict = field(default_factory=dict)
 
     def __post_init__(self):
-        self.url = self.url.strip()
+        # HN 等社区提交的链接偶尔带着手误的结尾反斜杠（mistral-large-4/\），会 404，也和官方原文去不了重
+        self.url = strip_tracking(self.url.strip().rstrip("\\"))
         self.title = " ".join(self.title.split())
         if not self.label:
             self.label = KIND_LABEL.get(self.kind, "社区")

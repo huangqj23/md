@@ -271,3 +271,29 @@ def test_aggregator_reposts_of_older_articles_are_stale():
     ]
     assert [e.title for e in drop_stale(events, since)] == ["美国昨天", "今天", "链接无日期"]
     assert triage.url_latest("https://e.com/2026/13/40/x") is None
+
+
+def test_image_403_falls_back_to_system_curl(tmp_path, monkeypatch):
+    # 2026-10-08：NVIDIA 技术博客图床按 TLS 指纹拦 httpx（带什么头都 403），系统 curl 能下
+    from types import SimpleNamespace
+
+    from ai_daily import images
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        ok = cmd[-1].endswith("/fastly.png")
+        return SimpleNamespace(returncode=0 if ok else 22, stdout=png_bytes() if ok else b"",
+                               stderr=b"" if ok else b"curl: (22) 403")
+
+    monkeypatch.setattr(images, "_curl_path", lambda: "/usr/bin/curl")
+    monkeypatch.setattr(images.subprocess, "run", fake_run)
+    handler = lambda request: httpx.Response(403 if "blocked" in request.url.path or "fastly" in request.url.path
+                                             else 404)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
+        assert images.save_image(http, "https://img.example.com/fastly.png", tmp_path / "a.png",
+                                 referer="https://developer.nvidia.com/blog/x")
+        assert not images.save_image(http, "https://img.example.com/blocked.png", tmp_path / "b.png")
+        assert not images.save_image(http, "https://img.example.com/gone.png", tmp_path / "c.png")   # 404 不走 curl
+    assert (tmp_path / "a.png").exists() and not (tmp_path / "b.png").exists()
+    assert len(calls) == 2 and calls[0][calls[0].index("-e") + 1] == "https://developer.nvidia.com/blog/x"

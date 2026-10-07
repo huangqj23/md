@@ -16,6 +16,13 @@ TWEET_MEDIA = {"2104984504133918973": {"video": {"poster": "https://pbs.twimg.co
                "2104986129686741046": {"photos": [{"url": "https://pbs.twimg.com/media/sol.jpg"}]}}
 NOW = datetime(2026, 9, 30, 6, 0, tzinfo=timezone.utc)
 
+
+@pytest.fixture(autouse=True)
+def _no_curl_fallback(monkeypatch):
+    """配图 403 时会改用系统 curl 真去下载；测试一律离线，默认关掉，测这条路径的用例自己再打补丁。"""
+    from ai_daily import images
+    monkeypatch.setattr(images, "_curl_path", lambda: None)
+
 EMPTY_ATOM = b'<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>x</title></feed>'
 ARTICLE_HTML = """<html><head><title>t</title><meta property="og:image" content="/img/cover.png"></head>
 <body><article><h1>Introducing GPT-6.1 Sol</h1>
