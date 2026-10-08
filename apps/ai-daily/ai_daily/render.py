@@ -37,7 +37,7 @@ def _local_date(dt: datetime) -> str:
 
 
 def _others(ev: Event) -> list:
-    """另见：主来源以外、信源名不重复的最多两个。"""
+    """另见：主来源以外、信源名不重复的最多两个。只写一次“另见”，用顿号隔开（用户 2026-10-08 要求）。"""
     seen, out = {ev.main_item.source_name}, []
     for it in ev.items:
         if it is ev.main_item or it.source_name in seen:

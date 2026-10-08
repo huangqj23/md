@@ -9,7 +9,9 @@
 window: {default_hours: 26, min_hours: 12, max_hours: 72}
 
 # 版面：头条 1 条 + 要闻 main 条（平铺，不分栏）+ 快讯 briefs 条；备选进审稿清单；配图最多 max_images 张
-layout: {main: 15, briefs: 10, backup: 20, max_images: 16}
+# 头条 + 要闻、快讯里：纯论文各最多 max_papers 篇，同一个主来源各最多 max_per_source 条，多出来的顺延到下一栏或备选
+# （2026-10-08：一期里好几条都出自 HF Daily Papers，读者想看的是新闻和进展）
+layout: {main: 15, briefs: 10, backup: 20, max_images: 16, max_papers: 1, max_per_source: 3}
 
 feeds:
   # ---- 官方博客（有官方 RSS）
@@ -104,7 +106,7 @@ github_releases:
   vision: [ultralytics/ultralytics, roboflow/supervision, huggingface/lerobot]
 
 hf:
-  daily_papers_limit: 25
+  daily_papers_limit: 10       # 正文最多放两篇论文，候选只取点赞最多的 10 篇
   trending_limit: 40
   trending_max_age_hours: 72   # 热门榜上只收 3 天内上传的模型：老模型上榜不算新闻
   per_org: 5

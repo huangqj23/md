@@ -85,7 +85,7 @@ def swap_thin_events(layout: triage.Layout, enrich) -> list[str]:
     moved, tried = [], {id(e) for e in layout.main}       # 要闻已经抓过原文；挪到快讯的也不再抓
     for ev in [e for e in layout.main if is_thin(e)]:
         for cand in layout.briefs:
-            if id(cand) in tried:
+            if id(cand) in tried or not layout.fits(layout.written, cand, leaving=ev):    # 换进来也不能超论文和同源上限
                 continue
             tried.add(id(cand))
             enrich(cand)
@@ -177,7 +177,8 @@ def run(settings: Settings, sources: dict, *, day: date, now: datetime, http, ll
         events = triage.drop_stale(events, since)
         cfg = sources.get("layout") or {}
         layout = triage.select(events, main=cfg.get("main", 15), briefs=cfg.get("briefs", 10),
-                               backup=cfg.get("backup", 20))
+                               backup=cfg.get("backup", 20), max_papers=cfg.get("max_papers", 1),
+                               max_per_source=cfg.get("max_per_source", 3))
         log.info("选题：头条「%s」，要闻 %d 条，快讯 %d 条，备选 %d 条", layout.headline.title,
                  len(layout.main), len(layout.briefs), len(layout.backup))
 

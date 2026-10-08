@@ -1,6 +1,6 @@
 {% macro badge(ev) %}
 {% set it = ev.main_item %}
-`{{ ev.label }}` · [{{ it.source_name }}]({{ it.url }}){% if it.published %} · {{ local_date(it.published) }}{% endif %}{% for o in others(ev) %} · 另见 [{{ o.source_name }}]({{ o.url }}){% endfor %}
+`{{ ev.label }}` · [{{ it.source_name }}]({{ it.url }}){% if it.published %} · {{ local_date(it.published) }}{% endif %}{% if others(ev) %} · 另见 {% for o in others(ev) %}[{{ o.source_name }}]({{ o.url }}){% if not loop.last %}、{% endif %}{% endfor %}{% endif %}
 {% endmacro %}
 {% macro figure(ev) %}
 {% if ev.image_path %}

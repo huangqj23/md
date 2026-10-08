@@ -8,9 +8,9 @@ from ai_daily import publish, render
 from ai_daily.config import Settings
 from ai_daily.llm import LLMPair
 from ai_daily.models import Event, Item
-from ai_daily.pipeline import dedupe, run
+from ai_daily.pipeline import dedupe, run, swap_thin_events
 from ai_daily.store import Store
-from ai_daily.triage import select
+from ai_daily.triage import Layout, select
 from conftest import NOW, ScriptedLLM
 
 DAY = date(2026, 9, 30)
@@ -25,7 +25,9 @@ SOURCES = {
     "github_releases": {"llm": ["vllm-project/vllm"], "agent": ["openai/codex"]},
     # 热门榜放宽到 30 天：让旧模型进入候选，验证选题后的旧闻过滤会把它们去掉
     "hf": {"daily_papers_limit": 5, "orgs": ["Qwen"], "trending_max_age_hours": 30 * 24},
-    "layout": {"main": 10, "briefs": 5, "backup": 20, "max_images": 11},   # 脚本化选题只给 ~16 个事件
+    # 脚本化选题只给 ~16 个事件，而且每条候选单独成事件、集中在少数几个信源：同源上限放宽，论文上限照常
+    # （上限本身见 test_select_caps_papers_and_same_source）
+    "layout": {"main": 10, "briefs": 5, "backup": 20, "max_images": 11, "max_per_source": 20},
     "hn": {}, "github_trending": {}, "openrouter": {"enabled": True},
     "official_x_handles": ["OpenAI"],
     "ai_keywords": ["ai", "agent", "model", "gpt", "llm", "voice"],
@@ -170,9 +172,51 @@ def test_publish_check_catches_missing_image(tmp_path):
     assert publish.check(art) == ["图片不存在：images/none.png"]
 
 
-def _ev(title, track, score):
-    return Event(title=title, items=[Item("s", "S", "official", title, f"https://e.com/{title}")],
-                 track=track, score=score, label="官方")
+def _ev(title, track, score, source=None, kind="official", label="官方"):
+    src = source or f"s-{title}"
+    return Event(title=title, items=[Item(src, src.upper(), kind, title, f"https://e.com/{title}")],
+                 track=track, score=score, label=label)
+
+
+def _paper(title, score):
+    return _ev(title, "llm", score, source="hf-papers", kind="paper", label="论文")
+
+
+def test_select_caps_papers_and_same_source():
+    events = ([_paper("p0", 99), _ev("n1", "llm", 98)] + [_paper(f"p{i}", 97 - i) for i in range(1, 5)]
+              + [_ev(f"o{i}", "llm", 90 - i, source="openai") for i in range(5)]
+              + [_ev(f"x{i}", "other", 80 - i) for i in range(20)])
+    layout = select(events, main=10, briefs=5, backup=10, max_papers=1, max_per_source=3)
+    assert layout.headline.title == "n1"                                   # 头条不选论文，哪怕论文分数更高
+    assert [e.title for e in layout.main] == ["p0", "o0", "o1", "o2"] + [f"x{i}" for i in range(6)]
+    assert [e.title for e in layout.briefs] == ["p1", "o3", "o4", "x6", "x7"]   # 超上限的顺延到快讯
+    assert [e.title for e in layout.backup][:4] == ["p2", "p3", "p4", "x8"] and len(layout.backup) == 10
+
+
+def test_select_headline_falls_back_to_paper_when_all_are_papers():
+    layout = select([_paper("a", 9), _paper("b", 8)], main=5, briefs=5, backup=5)
+    assert layout.headline.title == "a" and [e.title for e in layout.briefs] == ["b"]
+
+
+def test_swap_thin_events_respects_paper_cap():
+    head, paper_main, thin = _ev("h", "llm", 99), _paper("pm", 90), _ev("thin", "llm", 80)
+    thin.flags = ["主来源网页打不开（HTTP 403），只能依据信源摘要"]
+    paper_brief, normal = _paper("pb", 70), _ev("n", "llm", 60)
+    layout = Layout(head, [paper_main, thin], [paper_brief, normal], [])
+    assert swap_thin_events(layout, lambda ev: None) == ["thin"]
+    assert [e.title for e in layout.main] == ["pm", "n"]                   # 论文已经满了，换进来的是新闻
+    assert [e.title for e in layout.briefs] == ["thin", "pb"]
+
+
+def test_badge_lists_other_sources_after_one_see_also():
+    ev = Event(title="t", track="llm", score=90, label="官方", items=[
+        Item("claude", "Claude 博客", "official", "t", "https://anthropic.com/a"),
+        Item("openrouter", "OpenRouter", "price", "t", "https://openrouter.ai/a"),
+        Item("tns", "The New Stack", "media", "t", "https://thenewstack.io/a")])
+    md = render.render_article(Layout(ev, [], [], []), {"titles": ["AI 早报"], "highlights": []})
+    line = next(ln for ln in md.splitlines() if ln.startswith("`官方`"))
+    assert line.count("另见") == 1
+    assert line.endswith("另见 [OpenRouter](https://openrouter.ai/a)、[The New Stack](https://thenewstack.io/a)")
 
 
 def test_select_is_a_flat_ranking():
@@ -209,7 +253,8 @@ def test_preview_page_embeds_images_and_shows_draft_status(http, settings, tmp_p
     info = preview.build(result.article, out)
     page = out.read_text(encoding="utf-8")
     briefs = result.article.read_text(encoding="utf-8").split("## 快讯", 1)[1].split("---", 1)[0]
-    assert info["items"] == 10 and info["briefs"] == len(re.findall(r"^- ", briefs, re.M)) >= 4
+    # 脚本化选题的事件不多，其中 5 篇论文受上限只留 2 篇，快讯剩两三条
+    assert info["items"] == 10 and info["briefs"] == len(re.findall(r"^- ", briefs, re.M)) >= 2
     assert info["flags"] == 1 and info["opinion_todo"]
     assert page.startswith("<title>AI 早报 09.30</title>")
     assert page.count("data:image/webp;base64,") == info["images"] >= 9      # 图片全部内嵌，不引用本地文件

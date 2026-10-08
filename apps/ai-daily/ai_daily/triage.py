@@ -173,22 +173,57 @@ def drop_stale(events: list[Event], since: datetime) -> list[Event]:
     return keep
 
 
+def is_paper(ev: Event) -> bool:
+    """纯论文：可信度标成论文，或者来源全是论文站（HF Daily Papers、arXiv）。
+    实验室官方博客介绍的研究、带开源权重的发布不算。"""
+    return ev.label == "论文" or all(it.kind == "paper" for it in ev.items)
+
+
+def _source(ev: Event) -> str:
+    return ev.main_item.source
+
+
 @dataclass
 class Layout:
     headline: Event
     main: list[Event]                 # 要闻，按分数排好
     briefs: list[Event]               # 快讯
     backup: list[Event]               # 备选（不进正文）
+    max_papers: int = 1               # 头条 + 要闻、快讯里纯论文各最多几篇
+    max_per_source: int = 3           # 头条 + 要闻、快讯里同一个主来源各最多几条
 
     @property
     def written(self) -> list[Event]:
         """需要抓原文、写正文、配图的事件：头条 + 要闻。"""
         return [self.headline] + self.main
 
+    def fits(self, section: list[Event], ev: Event, leaving: Event | None = None) -> bool:
+        """ev 放进 section（written 或 briefs）后，论文篇数和同源条数是否还在上限内；leaving 是同时要挪走的那条。"""
+        others = [e for e in section if e is not leaving]
+        if is_paper(ev) and sum(map(is_paper, others)) >= self.max_papers:
+            return False
+        return sum(_source(e) == _source(ev) for e in others) < self.max_per_source
 
-def select(events: list[Event], *, main: int = 15, briefs: int = 10, backup: int = 20) -> Layout:
+
+def select(events: list[Event], *, main: int = 15, briefs: int = 10, backup: int = 20,
+           max_papers: int = 1, max_per_source: int = 3) -> Layout:
+    """按分数平铺，但不让正文被同一类内容占满（用户 2026-10-08：好几条都出自 HF Daily Papers、都是论文，
+    显得重复，刚入门的读者只想看最新的 AI 新闻和进展）：
+    - 头条不选纯论文，除非候选全是论文；
+    - 头条 + 要闻、快讯里，纯论文各最多 max_papers 篇，同一个主来源各最多 max_per_source 条；
+    - 超出上限的按分数顺延到快讯，再到备选。"""
     ranked = sorted(events, key=lambda e: e.score, reverse=True)
     if not ranked:
         raise ValueError("没有可用的候选事件（信源全部失败，或窗口内没有新动态）")
-    rest = ranked[1:]
-    return Layout(ranked[0], rest[:main], rest[main:main + briefs], rest[main + briefs:main + briefs + backup])
+    head = next((e for e in ranked if not is_paper(e)), ranked[0])
+    layout = Layout(head, [], [], [], max_papers, max_per_source)
+    for ev in ranked:
+        if ev is head:
+            continue
+        if len(layout.main) < main and layout.fits(layout.written, ev):
+            layout.main.append(ev)
+        elif len(layout.briefs) < briefs and layout.fits(layout.briefs, ev):
+            layout.briefs.append(ev)
+        elif len(layout.backup) < backup:
+            layout.backup.append(ev)
+    return layout

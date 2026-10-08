@@ -45,7 +45,7 @@ def inline(s: str) -> str:
 
 
 def meta_line(s: str) -> str:
-    """`官方` · [X @OpenAI](url) · 09-30 · 另见 [..](..)：可信度单独做成标签，其余是来源。"""
+    """`官方` · [X @OpenAI](url) · 09-30 · 另见 [..](..)、[..](..)：可信度单独做成标签，其余是来源。"""
     m = re.match(r"`([^`]+)`\s*·\s*(.*)$", s)
     if not m:
         return f'<p class="meta">{inline(s)}</p>'
