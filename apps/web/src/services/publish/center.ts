@@ -14,12 +14,21 @@ export type CheckKey
     | `titleTruncated`
     | `bodyFilled`
     | `bodyPartial`
+    | `fallback`
     | `imagesUploaded`
     | `imagesNotUploaded`
     | `imagesUnsupported`
+    | `linksUnwrapped`
+    | `linksNotAllowed`
+    | `formulasPlaced`
+    | `formulasNotPlaced`
+    | `formulasNeedSetting`
     | `draftSaved`
     | `autosave`
     | `draftNotSaved`
+    | `draftBlockedByImages`
+    | `draftBlockedByLinks`
+    | `split`
     | `error`
 
 export interface Check {
@@ -55,6 +64,8 @@ export function errorMessageKey(code?: RunErrorCode): string {
       return `publish.errors.editorNotFound`
     case `fill-failed`:
       return `publish.errors.fillFailed`
+    case `too-long`:
+      return `publish.errors.tooLong`
     case `page-timeout`:
       return `publish.errors.pageTimeout`
     case `page-error`:
@@ -66,11 +77,14 @@ export function errorMessageKey(code?: RunErrorCode): string {
   }
 }
 
-export function recordChecks(platform: Pick<PublishPlatform, `autosave` | `titleMaxLength`>, record: PlatformRecord): Check[] {
+export function recordChecks(platform: Pick<PublishPlatform, `autosave` | `titleMaxLength` | `bodyMaxLength`>, record: PlatformRecord): Check[] {
+  const split: Check[] = record.parts && record.parts.length > 1
+    ? [{ level: `ok`, key: `split`, params: { count: record.parts.length, limit: platform.bodyMaxLength ?? 0 } }]
+    : []
   if (record.status === `failed` || record.status === `login-required`)
-    return [{ level: `bad`, key: `error`, params: { code: record.errorCode ?? `` } }]
+    return [...split, { level: `bad`, key: `error`, params: { code: record.errorCode ?? `` } }]
 
-  const checks: Check[] = []
+  const checks: Check[] = [...split]
   const { report, warnings } = record
   if (warnings.includes(`title-not-filled`))
     checks.push({ level: `warn`, key: `titleNotFilled` })
@@ -88,18 +102,42 @@ export function recordChecks(platform: Pick<PublishPlatform, `autosave` | `title
   checks.push(warnings.includes(`body-partial`)
     ? { level: `warn`, key: `bodyPartial`, params: { percent } }
     : { level: `ok`, key: `bodyFilled`, params: { percent } })
+  if (warnings.includes(`fill-fallback`))
+    checks.push({ level: `warn`, key: `fallback` })
 
   if (report.images) {
-    checks.push(report.images.failed > 0
-      ? { level: `warn`, key: `imagesNotUploaded`, params: { ...report.images } }
-      : { level: `ok`, key: `imagesUploaded`, params: { total: report.images.total } })
+    const { total, failed, reasons } = report.images
+    checks.push(failed > 0
+      ? { level: `warn`, key: `imagesNotUploaded`, params: { total, failed, ...(reasons?.length ? { reasons: reasons.join(`；`) } : {}) } }
+      : { level: `ok`, key: `imagesUploaded`, params: { total } })
   }
   else if (record.unsupportedImages > 0) {
     checks.push({ level: `warn`, key: `imagesUnsupported`, params: { count: record.unsupportedImages } })
   }
 
+  if (report.links && report.links.unwrapped > 0) {
+    // A limit of 0 is the platform's rule for every account (Toutiao), not something to act on.
+    checks.push(report.links.limit === 0
+      ? { level: `ok`, key: `linksNotAllowed`, params: { count: report.links.unwrapped } }
+      : { level: `warn`, key: `linksUnwrapped`, params: { count: report.links.unwrapped, limit: report.links.limit } })
+  }
+
+  if (report.formulas) {
+    const { total, placed, needsSetting } = report.formulas
+    if (needsSetting)
+      checks.push({ level: `warn`, key: `formulasNeedSetting`, params: { total } })
+    else if (placed < total)
+      checks.push({ level: `warn`, key: `formulasNotPlaced`, params: { total, missing: total - placed } })
+    else
+      checks.push({ level: `ok`, key: `formulasPlaced`, params: { total } })
+  }
+
   if (report.draftSaved)
     checks.push({ level: `ok`, key: `draftSaved` })
+  else if (report.draftBlockedBy === `images`)
+    checks.push({ level: `warn`, key: `draftBlockedByImages` })
+  else if (report.draftBlockedBy === `links`)
+    checks.push({ level: `warn`, key: `draftBlockedByLinks`, params: { count: report.links?.remaining ?? 0, limit: report.links?.limit ?? 0 } })
   else if (platform.autosave)
     checks.push({ level: `ok`, key: `autosave` })
   else

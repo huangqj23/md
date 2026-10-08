@@ -4,7 +4,7 @@ import type { AgentArticle, AgentRequest, AgentResult, FillReport } from '@/publ
 import { describe, expect, it, vi } from 'vitest'
 import { wechatEditorUrl } from '@/publish-agent/platforms/wechat'
 import { getPublishPlatform } from './platforms'
-import { classifyReport, runPublish } from './runner'
+import { classifyReport, combineParts, runPublish } from './runner'
 
 const FAST: Partial<RunnerTiming> = { pageLoadTimeout: 300, stepTimeout: 300, settleDelay: 0, pollInterval: 1 }
 
@@ -178,6 +178,15 @@ describe(`runPublish`, () => {
     expect(stuck.runs[0]).toMatchObject({ status: `failed`, errorCode: `page-timeout` })
   })
 
+  it(`waits longer for a platform whose editor uploads every image during the step`, async () => {
+    const slow = () => new Promise<AgentResult>(resolve => setTimeout(resolve, 600, { kind: `done`, report: goodReport }))
+    // 600 ms is past the 300 ms test step timeout, but Bilibili asks for more.
+    const bilibili = (await run([`bilibili`], createFakeApi({ agent: slow }))).runs[0]
+    expect(bilibili.report).toEqual(goodReport)
+    expect(bilibili.errorCode).toBeUndefined()
+    expect((await run([`zhihu`], createFakeApi({ agent: slow }))).runs[0]).toMatchObject({ status: `failed`, errorCode: `agent-timeout` })
+  })
+
   it(`marks an empty agent answer and endless navigation as failures`, async () => {
     const empty = await run([`zhihu`], createFakeApi({ agent: () => undefined }))
     expect(empty.runs[0]).toMatchObject({ status: `failed`, errorCode: `no-result` })
@@ -239,6 +248,75 @@ describe(`runPublish`, () => {
   })
 })
 
+describe(`runPublish with an article in parts`, () => {
+  const partArticles: AgentArticle[] = [
+    { ...article, title: `T（上）`, markdown: `## a` },
+    { ...article, title: `T（下）`, markdown: `## b` },
+  ]
+
+  it(`fills each part as its own draft and reports them together`, async () => {
+    const fake = createFakeApi()
+    const updates: PlatformRun[] = []
+    const runs = await runPublish([getPublishPlatform(`zhihu`), getPublishPlatform(`juejin`)], article, {
+      api: fake.api,
+      onUpdate: update => updates.push(update),
+      timing: FAST,
+      parts: { zhihu: partArticles },
+    })
+
+    expect(fake.requests.map(r => [r.platform, r.article.title])).toEqual([[`zhihu`, `T（上）`], [`zhihu`, `T（下）`], [`juejin`, article.title]])
+    expect(runs[0]).toMatchObject({ status: `success`, tabId: 100 })
+    expect(runs[0].parts?.map(part => [part.title, part.status, part.tabId])).toEqual([[`T（上）`, `success`, 100], [`T（下）`, `success`, 101]])
+    expect(runs[0].report).toMatchObject({ bodyLength: 200, expectedLength: 200 })
+    // The platform only finishes once the last part does.
+    const zhihuStatuses = updates.filter(u => u.id === `zhihu`).map(u => u.status)
+    expect(zhihuStatuses.indexOf(`success`)).toBe(zhihuStatuses.length - 1)
+    expect(runs[1].parts).toBeUndefined()
+  })
+
+  it(`skips the remaining parts when the platform wants a login`, async () => {
+    const fake = createFakeApi({ landOn: () => `https://www.zhihu.com/signin?next=%2Fwrite` })
+    const runs = await runPublish([getPublishPlatform(`zhihu`)], article, {
+      api: fake.api,
+      onUpdate: () => {},
+      timing: FAST,
+      parts: { zhihu: partArticles },
+    })
+
+    expect(runs[0]).toMatchObject({ status: `login-required`, errorCode: `login-required` })
+    expect(runs[0].parts?.map(part => part.status)).toEqual([`login-required`, `cancelled`])
+    expect(fake.api.openTab).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe(`runPublish with a platform-specific article`, () => {
+  it(`gives WeChat its own version and every other platform the shared one`, async () => {
+    const fake = createFakeApi({
+      agent: request => request.step === `prepare` ? { kind: `navigate`, url: `https://mp.weixin.qq.com/editor`, step: `fill` } : { kind: `done`, report: goodReport },
+    })
+    const forWechat: AgentArticle = { ...article, wechatHtml: `<p>带二维码</p>` }
+    await runPublish([getPublishPlatform(`wechat`), getPublishPlatform(`zhihu`)], article, {
+      api: fake.api,
+      onUpdate: () => {},
+      timing: FAST,
+      articles: { wechat: forWechat },
+    })
+
+    expect(fake.requests.filter(r => r.platform === `wechat`).every(r => r.article.wechatHtml === `<p>带二维码</p>`)).toBe(true)
+    expect(fake.requests.find(r => r.platform === `zhihu`)?.article.wechatHtml).toBe(``)
+  })
+})
+
+describe(`combineParts`, () => {
+  it(`names the part that failed`, () => {
+    const combined = combineParts([
+      { title: `T（上）`, status: `success`, warnings: [], report: goodReport, tabId: 3 },
+      { title: `T（下）`, status: `failed`, warnings: [], errorCode: `fill-failed`, detail: `empty` },
+    ])
+    expect(combined).toMatchObject({ status: `failed`, errorCode: `fill-failed`, detail: `Part 2/2: empty`, tabId: 3 })
+  })
+})
+
 describe(`classifyReport`, () => {
   const autosaving = { autosave: true }
 
@@ -262,5 +340,10 @@ describe(`classifyReport`, () => {
 
   it(`does not ask to save drafts on platforms that autosave`, () => {
     expect(classifyReport({ ...goodReport, draftSaved: false }, autosaving, false).status).toBe(`success`)
+  })
+
+  it(`asks for a review when the body went in by a fallback`, () => {
+    expect(classifyReport({ ...goodReport, fallback: `markdown-rejected` }, autosaving, false))
+      .toEqual({ status: `warning`, warnings: [`fill-fallback`] })
   })
 })

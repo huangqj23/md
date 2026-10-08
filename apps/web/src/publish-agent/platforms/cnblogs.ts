@@ -1,8 +1,16 @@
 // Editor detection follows doocs/cose and leaperone/MultiPost-Extension (both Apache-2.0).
 // Cnblogs renders whichever editor the account has chosen in its settings.
+//
+// Formulas only render when the account has 启用数学公式支持 on (`isEnableMathFormula` in
+// `/api/preferences`, next to the engine choice). It is a blog-wide preference, not a post option:
+// with it off, the Markdown renderer also eats the backslashes inside formulas (`\,` → `,`) and the blog
+// loads no formula engine. The agent reads it and reports formulas that will show as source; it does
+// not switch it on, since that changes how every post on the blog renders. Read from the i.cnblogs.com
+// bundles (2026-10-08).
 import type { AgentArticle, AgentResult, FillReport } from '../protocol'
 import type { PlatformFiller } from '../result'
 import { countTextChars, queryFirst, setFieldValue, sleep, waitFor } from '../dom'
+import { FORMULA_TEX_ATTR } from '../protocol'
 import { done, editorMissing, fail } from '../result'
 import { getCodeMirror } from './codemirror'
 
@@ -16,6 +24,24 @@ const TITLE_SELECTORS = [`#post-title`, `input[placeholder*="标题"]`]
 function tinymceEditor(): TinyMceEditor | null {
   const editor = (window as Window & { tinymce?: { activeEditor?: TinyMceEditor | null } }).tinymce?.activeEditor
   return editor && typeof editor.setContent === `function` ? editor : null
+}
+
+function countFormulas(html: string): number {
+  return new DOMParser().parseFromString(`<body>${html}</body>`, `text/html`).body.querySelectorAll(`[${FORMULA_TEX_ATTR}]`).length
+}
+
+/** The account's 启用数学公式支持, or null when the preferences could not be read. */
+export async function mathFormulasEnabled(): Promise<boolean | null> {
+  try {
+    const response = await fetch(`/api/preferences`, { credentials: `include`, headers: { accept: `application/json` } })
+    if (!response.ok)
+      return null
+    const enabled = (await response.json() as { isEnableMathFormula?: unknown }).isEnableMathFormula
+    return typeof enabled === `boolean` ? enabled : null
+  }
+  catch {
+    return null
+  }
 }
 
 async function fill(article: AgentArticle): Promise<AgentResult> {
@@ -54,6 +80,13 @@ async function fill(article: AgentArticle): Promise<AgentResult> {
 
   if (report.bodyLength === 0 && report.expectedLength > 0)
     return fail(`fill-failed`, `Cnblogs editor stayed empty`, report)
+
+  const formulas = countFormulas(article.html)
+  if (formulas > 0) {
+    const enabled = await mathFormulasEnabled()
+    if (enabled !== null)
+      report.formulas = enabled ? { total: formulas, placed: formulas } : { total: formulas, placed: 0, needsSetting: true }
+  }
   return done(report)
 }
 

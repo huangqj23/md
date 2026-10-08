@@ -1,18 +1,21 @@
-import type { PublishPlatformId } from '@/publish-agent/protocol'
+import type { AgentArticle, PublishPlatformId } from '@/publish-agent/protocol'
 import type { LoginInfo, PublishPlatform } from '@/services/publish/platforms'
 import type { PublishRecord } from '@/services/publish/records'
 import type { PlatformRun, RunStatus } from '@/services/publish/runner'
 import { getLocale, t } from '@/i18n/translate'
 import { PUBLISH_PLATFORM_IDS } from '@/publish-agent/protocol'
 import { processClipboardContent } from '@/services/export'
-import { auditImages, buildAgentArticle, extractMarkdownTitle, extractSummary } from '@/services/publish/article'
+import { auditImages, buildAgentArticle, extractMarkdownTitle, extractSummary, withoutWechatOnly } from '@/services/publish/article'
 import { isLiveStatus } from '@/services/publish/center'
 import { createPublishTabsApi, getExtensionGlobal } from '@/services/publish/extension-api'
+import { withPlainFormulas } from '@/services/publish/formulas'
 import { createDetectContext, detectLoginStates } from '@/services/publish/login'
 import { hasPublishPermissions, matchesPattern, requestPublishPermissions } from '@/services/publish/permissions'
 import { getPublishPlatform, PUBLISH_PLATFORMS } from '@/services/publish/platforms'
 import { applyRun, beginSync, contentHash, markPublished, unmarkPublished } from '@/services/publish/records'
 import { runPublish } from '@/services/publish/runner'
+import { splitArticle } from '@/services/publish/split'
+import { withTablesAsImages } from '@/services/publish/tables'
 import { store } from '@/storage'
 import { addPrefix } from '@/storage/prefix'
 import { useEditorStore } from '@/stores/editor'
@@ -27,6 +30,64 @@ export interface PublishInput {
   summary: string
   /** Defaults to the platforms selected in the publish dialog. */
   platformIds?: readonly PublishPlatformId[]
+}
+
+/** Part titles and the lines that point readers to the other parts, in the UI language. */
+function splitMessages() {
+  const label = (index: number, total: number) => {
+    const names = total === 2 ? [`upper`, `lower`] : total === 3 ? [`upper`, `middle`, `lower`] : []
+    return t(`publish.split.labels.${names[index] ?? `numbered`}`, { index: index + 1, total })
+  }
+  return {
+    partTitle: (title: string, index: number, total: number) => t(`publish.split.title`, { title, label: label(index, total) }),
+    continuedIn: (title: string) => t(`publish.split.continued`, { title }),
+    continuedFrom: (title: string) => t(`publish.split.continuedFrom`, { title }),
+  }
+}
+
+/** Splits the article for each platform it is too long for; platforms not listed get it whole. */
+async function splitForLimits(platforms: readonly PublishPlatform[], article: AgentArticle): Promise<Partial<Record<PublishPlatformId, AgentArticle[]>>> {
+  const result: Partial<Record<PublishPlatformId, AgentArticle[]>> = {}
+  for (const platform of platforms) {
+    if (!platform.bodyMaxLength || article.textLength <= platform.bodyMaxLength)
+      continue
+    const parts = await splitArticle(article, { limit: platform.bodyMaxLength, titleMaxLength: platform.titleMaxLength, ...splitMessages() })
+    if (parts)
+      result[platform.id] = parts
+    else
+      console.warn(`[publish] ${platform.id}: article is over the length limit and has no headings to split at`)
+  }
+  return result
+}
+
+/**
+ * WeChat keeps the article with its QR code; editors without tables get every table drawn as an
+ * image, and editors that strip SVG get display formulas drawn as images and inline ones as text.
+ */
+async function articlesByPlatform(
+  platforms: readonly PublishPlatform[],
+  article: AgentArticle,
+  elsewhere: AgentArticle,
+): Promise<Partial<Record<PublishPlatformId, AgentArticle>>> {
+  const result: Partial<Record<PublishPlatformId, AgentArticle>> = { wechat: article }
+  // Each drawing is done once and shared by the platforms that need it.
+  let tables: Promise<AgentArticle> | undefined
+  const formulas = new Map<AgentArticle, Promise<AgentArticle>>()
+  for (const platform of platforms) {
+    if (!platform.tablesAsImages && !platform.plainFormulas)
+      continue
+    let prepared = elsewhere
+    if (platform.tablesAsImages)
+      prepared = await (tables ??= withTablesAsImages(elsewhere))
+    if (platform.plainFormulas) {
+      const source = prepared
+      if (!formulas.has(source))
+        formulas.set(source, withPlainFormulas(source))
+      prepared = await formulas.get(source)!
+    }
+    result[platform.id] = prepared
+  }
+  return result
 }
 
 /** Native multi-platform publishing is only possible from the extension's own pages. */
@@ -175,10 +236,14 @@ export const usePublishStore = defineStore(`publish`, () => {
         markdown,
         wechatHtml: await collectWechatHtml(),
       })
+      // Only the WeChat article keeps the account's QR code; other platforms count it as off-site promotion.
+      const elsewhere = withoutWechatOnly(article)
       const time = new Date().toLocaleTimeString(getLocale(), { hour: `2-digit`, minute: `2-digit` })
-      const results = await runPublish(platforms, article, {
+      const results = await runPublish(platforms, elsewhere, {
         api: createPublishTabsApi(ext),
         groupTitle: t(`publish.groupTitle`, { time }),
+        articles: await articlesByPlatform(platforms, article, elsewhere),
+        parts: await splitForLimits(platforms, elsewhere),
         shouldCancel: () => cancelRequested.value,
         onUpdate: (run) => {
           const index = runs.value.findIndex(item => item.id === run.id)
@@ -235,13 +300,16 @@ export const usePublishStore = defineStore(`publish`, () => {
   }
 
   /**
-   * Brings back the tab a platform was filled in. False when it is gone: tab ids
-   * restart with the browser, so a stored id may now belong to an unrelated tab.
+   * Brings back the tab a platform (or one part of a split article) was filled in. False
+   * when it is gone: tab ids restart with the browser, so a stored id may now belong to an unrelated tab.
    */
-  async function openPlatformTab(postId: string, id: PublishPlatformId): Promise<boolean> {
+  async function openPlatformTab(postId: string, id: PublishPlatformId, part?: number): Promise<boolean> {
     const tabs = getExtensionGlobal()?.tabs
-    const liveTabId = runPostId.value === postId ? runs.value.find(run => run.id === id)?.tabId : undefined
-    const tabId = liveTabId ?? records.value[postId]?.platforms[id]?.tabId
+    const liveRun = runPostId.value === postId ? runs.value.find(run => run.id === id) : undefined
+    const record = records.value[postId]?.platforms[id]
+    const tabId = part === undefined
+      ? liveRun?.tabId ?? record?.tabId
+      : liveRun?.parts?.[part]?.tabId ?? record?.parts?.[part]?.tabId
     if (!tabs || tabId === undefined)
       return false
     try {

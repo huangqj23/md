@@ -1,6 +1,7 @@
 import type { AgentArticle } from '@/publish-agent/protocol'
 import { generatePureHTML } from '@md/core/utils'
 import { countTextChars } from '@/publish-agent/dom'
+import { FORMULA_DISPLAY_ATTR, FORMULA_TEX_ATTR } from '@/publish-agent/protocol'
 
 export const SUMMARY_MAX_LENGTH = 120
 
@@ -74,22 +75,29 @@ export function removeLeadingTitleHeading(root: ParentNode, title: string) {
     heading.remove()
 }
 
+/** The TeX inside a formula's source: `$…$`, `$$…$$`, `\(…\)` or `\[…\]`. */
+export function texOf(raw: string): string {
+  const source = raw.trim()
+  const match = source.match(/^\$\$([\s\S]*)\$\$$/) ?? source.match(/^\$([\s\S]*)\$$/)
+    ?? source.match(/^\\\(([\s\S]*)\\\)$/) ?? source.match(/^\\\[([\s\S]*)\\\]$/)
+  return (match ? match[1] : source).trim()
+}
+
 /**
- * MathJax output is SVG, which non-WeChat editors discard. Put the original
- * `$…$` source back so the formula survives as readable TeX.
+ * MathJax output is SVG, which non-WeChat editors discard. Put the original `$…$` source back so
+ * the formula survives as readable TeX, in an element that also keeps the bare TeX
+ * (`FORMULA_TEX_ATTR`) for editors that can rebuild real formulas from it.
  */
 export function degradeFormulas(root: ParentNode) {
   for (const formula of Array.from(root.querySelectorAll(`.katex-inline, .katex-block`))) {
     const raw = formula.getAttribute(`data-math-raw`) ?? ``
-    const doc = formula.ownerDocument
-    if (formula.classList.contains(`katex-block`)) {
-      const paragraph = doc.createElement(`p`)
-      paragraph.textContent = raw
-      formula.replaceWith(paragraph)
-    }
-    else {
-      formula.replaceWith(doc.createTextNode(raw))
-    }
+    const display = formula.classList.contains(`katex-block`)
+    const holder = formula.ownerDocument.createElement(display ? `p` : `span`)
+    holder.setAttribute(FORMULA_TEX_ATTR, texOf(raw))
+    if (display)
+      holder.setAttribute(FORMULA_DISPLAY_ATTR, ``)
+    holder.textContent = raw
+    formula.replaceWith(holder)
   }
 }
 
@@ -120,7 +128,7 @@ export function extractSummary(root: ParentNode, maxLength = SUMMARY_MAX_LENGTH)
   return ``
 }
 
-function parseFragment(html: string): HTMLElement {
+export function parseFragment(html: string): HTMLElement {
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, `text/html`)
   return doc.body
 }
@@ -140,6 +148,42 @@ export function toWechatHtml(wechatHtml: string, title: string): string {
   const body = parseFragment(wechatHtml)
   removeLeadingTitleHeading(body, title)
   return body.innerHTML
+}
+
+/**
+ * Images only the WeChat article carries, i.e. the account's QR code: other platforms treat
+ * off-site QR codes as promotion. watermark.py marks embedded ones `data-publish-only="wechat"`;
+ * drafts still point at a file whose name contains `_wxonly`.
+ */
+const WECHAT_ONLY_IMAGES = `img[data-publish-only="wechat"], img[src*="_wxonly"]`
+const WECHAT_ONLY_HTML_IMG = /<img\s[^>]*?data-publish-only="wechat"[^>]*>/gi
+const WECHAT_ONLY_MD_IMG = /!\[[^\]]*\]\([^)\s]*_wxonly[^)\s]*\)/g
+
+export function removeWechatOnlyImages(root: ParentNode) {
+  for (const img of Array.from(root.querySelectorAll(WECHAT_ONLY_IMAGES))) {
+    const holder = img.closest(`figure`) ?? img
+    const parent = holder.parentElement
+    holder.remove()
+    if (parent?.tagName === `P` && !parent.textContent?.trim() && !parent.querySelector(`img, svg`))
+      parent.remove()
+  }
+}
+
+/** The article for every platform but WeChat: the same, minus the WeChat-only images. */
+export function withoutWechatOnly(article: AgentArticle): AgentArticle {
+  const strip = (html: string) => {
+    const body = parseFragment(html)
+    removeWechatOnlyImages(body)
+    return body
+  }
+  const html = strip(article.html)
+  return {
+    ...article,
+    markdown: article.markdown.replace(WECHAT_ONLY_HTML_IMG, ``).replace(WECHAT_ONLY_MD_IMG, ``).replace(/\n{3,}/g, `\n\n`).trim(),
+    html: html.innerHTML.trim(),
+    wechatHtml: article.wechatHtml ? strip(article.wechatHtml).innerHTML : ``,
+    textLength: countTextChars(html.textContent),
+  }
 }
 
 export interface ArticleSource {

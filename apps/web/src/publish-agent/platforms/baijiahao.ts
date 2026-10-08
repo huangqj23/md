@@ -1,5 +1,5 @@
 // UEditor flow follows doocs/cose (Apache-2.0).
-import type { AgentArticle, AgentResult } from '../protocol'
+import type { AgentArticle, AgentResult, FillReport } from '../protocol'
 import type { PlatformFiller } from '../result'
 import {
   clickButtonWhenReady,
@@ -14,6 +14,7 @@ import {
   waitForStable,
 } from '../dom'
 import { done, editorMissing, fail } from '../result'
+import { createBaijiahaoUploader, isBaiduImage, UPLOAD_WITHIN_STEP, uploadHtmlImages } from './platform-images'
 import { findUEditor, isUEditorReady } from './ueditor'
 
 const TITLE_EDITABLE_SELECTORS = [
@@ -37,6 +38,28 @@ function editorFrameBody(): HTMLElement | null {
   return null
 }
 
+const LIST_MARKER = /^\s*(?:\d+\.|•)\s/
+
+/**
+ * md writes each list item's marker into its text ("4. ", "• ") and hides the real one with
+ * `list-style: none`, which WeChat keeps; Baijiahao drops that style and numbers the list itself,
+ * so the text markers would show twice.
+ */
+export function dropListMarkers(html: string): string {
+  const template = document.createElement(`template`)
+  template.innerHTML = html
+  for (const item of Array.from(template.content.querySelectorAll(`li`))) {
+    const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.textContent?.trim())
+        continue
+      node.textContent = node.textContent.replace(LIST_MARKER, ``)
+      break
+    }
+  }
+  return template.innerHTML
+}
+
 function fillTitle(title: string): boolean {
   const editable = queryFirst<HTMLElement>(TITLE_EDITABLE_SELECTORS)
   if (editable)
@@ -57,7 +80,10 @@ async function fill(article: AgentArticle): Promise<AgentResult> {
 
   await sleep(1000)
   const titleFilled = fillTitle(article.title)
-  const html = article.wechatHtml || article.html
+  // Every image goes to Baijiahao's material library first: a draft holding embedded (data:) ones
+  // is megabytes and cannot be saved, and the editor leaves outside-hosted ones blank.
+  const images = await uploadHtmlImages(article.wechatHtml || article.html, createBaijiahaoUploader(), { ...UPLOAD_WITHIN_STEP, isHosted: isBaiduImage })
+  const html = dropListMarkers(images.text)
 
   const editor = findUEditor()
   let method: string
@@ -77,7 +103,14 @@ async function fill(article: AgentArticle): Promise<AgentResult> {
     bodyLength = await waitForStable(() => elementTextChars(editorFrameBody()))
   }
 
-  const report = { titleFilled, bodyLength, expectedLength: article.textLength, method, draftSaved: false }
+  const report: FillReport = {
+    titleFilled,
+    bodyLength,
+    expectedLength: article.textLength,
+    method,
+    draftSaved: false,
+    ...(images.total ? { images: { total: images.total, failed: images.failed, ...(images.reasons ? { reasons: images.reasons } : {}) } } : {}),
+  }
   if (bodyLength === 0 && article.textLength > 0)
     return fail(`fill-failed`, `Baijiahao editor stayed empty`, report)
 

@@ -9,8 +9,10 @@ import {
   fitTitle,
   removeLeadingTitleHeading,
   stripLeadingTitle,
+  texOf,
   toPlatformHtml,
   toWechatHtml,
+  withoutWechatOnly,
 } from './article'
 
 function fragment(html: string): HTMLElement {
@@ -72,6 +74,28 @@ describe(`degradeFormulas`, () => {
     expect(root.querySelectorAll(`p`)[1].textContent).toBe(`$$E=mc^2$$`)
     expect(root.textContent).toContain(`$x$`)
   })
+
+  it(`keeps the bare TeX on the element, and marks display formulas`, () => {
+    const root = fragment(
+      `<p>a <span class="katex-inline" data-math-raw="$\\alpha_1$"><svg/></span></p>`
+      + `<section class="katex-block" data-math-raw="$$\nN^\\star(C) = A\n$$"><svg/></section>`,
+    )
+    degradeFormulas(root)
+    expect(root.innerHTML).toBe(
+      `<p>a <span data-tex="\\alpha_1">$\\alpha_1$</span></p>`
+      + `<p data-tex="N^\\star(C) = A" data-tex-display="">$$\nN^\\star(C) = A\n$$</p>`,
+    )
+  })
+})
+
+describe(`texOf`, () => {
+  it(`drops every delimiter the renderer accepts`, () => {
+    expect(texOf(`$x^2$`)).toBe(`x^2`)
+    expect(texOf(` $$\n\\frac{a}{b}\n$$ `)).toBe(`\\frac{a}{b}`)
+    expect(texOf(`\\(a+b\\)`)).toBe(`a+b`)
+    expect(texOf(`\\[a+b\\]`)).toBe(`a+b`)
+    expect(texOf(`plain`)).toBe(`plain`)
+  })
 })
 
 describe(`auditImages`, () => {
@@ -104,7 +128,7 @@ describe(`toPlatformHtml / toWechatHtml`, () => {
       `<style>p{}</style><h1>T</h1><p>a <span class="katex-inline" data-math-raw="$x$"><svg/></span></p><script>1</script>`,
       `T`,
     )
-    expect(html).toBe(`<p>a $x$</p>`)
+    expect(html).toBe(`<p>a <span data-tex="x">$x$</span></p>`)
     expect(textLength).toBe(4)
   })
 
@@ -144,5 +168,35 @@ describe(`fitTitle`, () => {
   it(`leaves short titles and unlimited platforms alone`, () => {
     expect(fitTitle(base, 30)).toEqual({ article: base, truncated: false })
     expect(fitTitle(base)).toEqual({ article: base, truncated: false })
+  })
+})
+
+describe(`withoutWechatOnly`, () => {
+  const qr = `<img alt="微信扫码关注" src="data:image/webp;base64,AAAA" style="max-width:100%;" data-publish-only="wechat" />`
+  const article = {
+    title: `T`,
+    summary: ``,
+    markdown: `正文\n\n![图 1](images/fig1.png)\n\n关注**账号**：宣传语。\n\n${qr}\n\n留言。`,
+    html: `<p>正文</p><figure><img src="images/fig1.png"></figure><p>关注<strong>账号</strong>：宣传语。</p>${qr}<p>留言。</p>`,
+    wechatHtml: `<section><p>正文</p><figure><img src="a.png"><figcaption>图 1</figcaption></figure><p>${qr}</p><p>留言。</p></section>`,
+    textLength: 13,
+  }
+
+  it(`drops the WeChat-only QR code and keeps everything else`, () => {
+    const result = withoutWechatOnly(article)
+    expect(result.markdown).toBe(`正文\n\n![图 1](images/fig1.png)\n\n关注**账号**：宣传语。\n\n留言。`)
+    expect(result.html).not.toContain(`data-publish-only`)
+    expect(result.html).toContain(`images/fig1.png`)
+    expect(result.html).toContain(`宣传语`)
+    expect(result.wechatHtml).not.toContain(`data-publish-only`)
+    expect(result.wechatHtml).not.toContain(`<p></p>`)
+    expect(result.wechatHtml).toContain(`<figcaption>图 1</figcaption>`)
+  })
+
+  it(`also drops a draft's reference to the QR file`, () => {
+    const draft = { ...article, markdown: `宣传语\n\n![扫码](../../_brand/hollis23/wechat-qrcode_nowm_wxonly.png)`, html: `<figure><img src="../../_brand/hollis23/wechat-qrcode_nowm_wxonly.png"><figcaption>扫码</figcaption></figure>`, wechatHtml: `` }
+    const result = withoutWechatOnly(draft)
+    expect(result.markdown).toBe(`宣传语`)
+    expect(result.html).toBe(``)
   })
 })

@@ -132,6 +132,10 @@ def render_body(md: str, base: Path) -> tuple[str, dict]:
             html_parts.append(meta_line(" ".join(b)))
             continue
         m = re.match(r"^!\[([^\]]*)\]\(([^)\s]+)\)$", first)
+        if m and not (base / m.group(2)).is_file():
+            # 例如文末二维码还没放进品牌目录：预览照出，标出缺的图（发布检查会拦）
+            html_parts.append(f"<p>（图片不存在：{html.escape(m.group(2))}）</p>")
+            continue
         if m:
             src, w, h = data_uri(base / m.group(2))
             info["images"] += 1
@@ -358,7 +362,7 @@ def build(article: Path, out: Path, mark: Path | None = None) -> dict:
 <div class="wrap">
   <section class="status" aria-label="草稿状态">
     <div class="status-top">
-      <span class="brand">{mark_svg(mark)}hollis23 AI 早报</span>
+      <span class="brand">{mark_svg(mark)}Hollis的视觉大模型实战 · AI 早报</span>
       <span class="draft-tag">草稿预览 · {html.escape(day)} · 由 ai-daily 生成，还没发布</span>
     </div>
     <ul class="stats">
@@ -374,7 +378,7 @@ def build(article: Path, out: Path, mark: Path | None = None) -> dict:
     {cover_html}
     <div class="inner">
       <h1>{html.escape(info["title"])}</h1>
-      <p class="byline"><span class="who">hollis23</span><span class="num">{html.escape(day)}</span>{f'<span>第 <span class="num">{issue.group(1)}</span> 期</span>' if issue else ""}</p>
+      <p class="byline"><span class="who">Hollis的视觉大模型实战</span><span class="num">{html.escape(day)}</span>{f'<span>第 <span class="num">{issue.group(1)}</span> 期</span>' if issue else ""}</p>
 {body}
     </div>
   </main>

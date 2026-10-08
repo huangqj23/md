@@ -106,7 +106,9 @@ def test_full_run_with_llm(http, settings):
     # 头条配图：官方博客的 og:image，存成 _nowm，不加水印
     assert re.search(r"!\[中文标题\]\(images/2026-09-30_h_nowm\.png\)\n\n[^\n]+（图源：OpenAI 官方博客）\n", md)
     assert "<p style=" not in md
-    assert "关注**Hollis的多模态视觉大模型实战**：" in md               # 文末公众号名加粗
+    assert "关注**Hollis的视觉大模型实战**：" in md                     # 文末公众号名加粗（二维码名片上的写法）
+    # 文末二维码引用 vault 的品牌目录，相对正文写；文件名带 _wxonly，多平台同步时只发公众号
+    assert md.rstrip().endswith("![微信扫码关注 Hollis的视觉大模型实战](../../_brand/hollis23/wechat-qrcode_nowm_wxonly.png)")
     assert (result.article.parent / "images" / "2026-09-30_h_nowm.png").is_file()
 
     review = result.review.read_text(encoding="utf-8")
@@ -154,6 +156,10 @@ def test_publish_check_then_mark_published(http, settings):
     md = result.article.read_text(encoding="utf-8").replace("【我的看法：待写】", "我认为值得一试。")
     md = re.sub(r"【待核对：[^】]*】\n?", "", md)
     result.article.write_text(md, encoding="utf-8")
+    # 文末二维码放在 vault 的品牌目录里；还没放进去时，发布检查会拦下来
+    assert publish.check(result.article) == ["图片不存在：../../_brand/hollis23/wechat-qrcode_nowm_wxonly.png"]
+    settings.qr_code.parent.mkdir(parents=True, exist_ok=True)
+    settings.qr_code.write_bytes(b"png")
     assert publish.check(result.article) == []
 
     store = Store(settings.db_path)
@@ -257,6 +263,7 @@ def test_preview_page_embeds_images_and_shows_draft_status(http, settings, tmp_p
     assert info["items"] == 10 and info["briefs"] == len(re.findall(r"^- ", briefs, re.M)) >= 2
     assert info["flags"] == 1 and info["opinion_todo"]
     assert page.startswith("<title>AI 早报 09.30</title>")
+    assert '<span class="who">Hollis的视觉大模型实战</span>' in page          # 署名用公众号名，不用 hollis23
     assert page.count("data:image/webp;base64,") == info["images"] >= 9      # 图片全部内嵌，不引用本地文件
     assert 'src="images/' not in page
     assert page.count("（图源：") == info["images"] and "<figcaption>" not in page   # 图源在正文段落里

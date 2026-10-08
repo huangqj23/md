@@ -2,6 +2,7 @@
 import type { PublishPlatformId } from '@/publish-agent/protocol'
 import type { Check, CheckLevel, PlatformView } from '@/services/publish/center'
 import type { PublishEvent, PublishRecord } from '@/services/publish/records'
+import type { RunStatus } from '@/services/publish/runner'
 import { Check as CheckIcon, CircleX, TriangleAlert } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,7 +22,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   sync: [id: PublishPlatformId]
-  openTab: [id: PublishPlatformId]
+  openTab: [id: PublishPlatformId, part?: number]
 }>()
 
 const { t, locale } = useI18n()
@@ -89,7 +90,29 @@ const CHECK_ICON: Record<CheckLevel, { icon: typeof CheckIcon, tone: string }> =
 function checkText(check: Check): string {
   if (check.key === `error`)
     return t(errorMessageKey(platformRecord.value?.errorCode))
+  if (check.key === `split`)
+    return t(`publish.center.checks.split`, { ...check.params, limit: Number(check.params?.limit ?? 0).toLocaleString(locale.value) })
+  // The platform's own words are the best lead on why an upload failed.
+  if (check.key === `imagesNotUploaded` && check.params?.reasons)
+    return t(`publish.center.checks.imagesNotUploadedBecause`, check.params)
   return t(`publish.center.checks.${check.key}`, check.params ?? {})
+}
+
+const PART_STATE_KEY: Partial<Record<RunStatus, string>> = {
+  'queued': `queued`,
+  'success': `draft`,
+  'warning': `attention`,
+  'failed': `failed`,
+  'login-required': `loginRequired`,
+  'opening': `opening`,
+  'filling': `filling`,
+}
+
+/** The drafts of an article that went in as several parts, live while a sync runs. */
+const parts = computed(() => props.view.live?.parts ?? platformRecord.value?.parts ?? [])
+
+function partState(status: RunStatus): string {
+  return t(`publish.center.state.${PART_STATE_KEY[status] ?? `idle`}`)
 }
 
 const canMarkPublished = computed(() =>
@@ -160,6 +183,12 @@ const diagnostics = computed(() => {
       <p class="text-sm leading-relaxed">
         <span v-for="(sentence, index) in sentences" :key="index" class="me-1">{{ sentence }}</span>
       </p>
+      <p
+        v-if="(view.state === 'failed' || view.state === 'login-required') && platformRecord?.detail"
+        class="break-all text-xs text-muted-foreground"
+      >
+        {{ platformRecord.detail }}
+      </p>
 
       <div class="flex flex-wrap gap-2">
         <template v-if="view.state === 'idle'">
@@ -204,6 +233,29 @@ const diagnostics = computed(() => {
         {{ platformRecord.published.url }}
       </p>
     </div>
+
+    <section v-if="parts.length > 1" class="flex flex-col gap-2">
+      <h4 class="text-sm font-semibold">
+        {{ t('publish.center.parts.heading') }}
+      </h4>
+      <ol class="flex flex-col gap-1.5">
+        <li v-for="(part, index) in parts" :key="index" class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+          <span class="min-w-0 flex-[1_1_160px] break-words">{{ part.title }}</span>
+          <span class="text-xs text-muted-foreground">{{ partState(part.status) }}</span>
+          <Button
+            v-if="part.tabId !== undefined"
+            size="xs"
+            variant="ghost"
+            @click="emit('openTab', id, index)"
+          >
+            {{ t('publish.center.actions.openDraft') }}
+          </Button>
+          <p v-if="part.detail && (part.status === 'failed' || part.status === 'login-required')" class="w-full break-all text-xs text-muted-foreground">
+            {{ part.detail }}
+          </p>
+        </li>
+      </ol>
+    </section>
 
     <section v-if="view.checks.length && platformRecord" class="flex flex-col gap-2">
       <h4 class="text-sm font-semibold">

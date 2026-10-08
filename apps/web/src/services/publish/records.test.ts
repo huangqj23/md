@@ -84,6 +84,21 @@ describe(`applyRun`, () => {
     expect(failed.platforms.csdn?.history[0].errorCode).toBe(`fill-failed`)
   })
 
+  it(`keeps the parts of a split article, and their draft even if one part failed`, () => {
+    const split = run({
+      id: `zhihu`,
+      status: `failed`,
+      errorCode: `fill-failed`,
+      parts: [
+        { title: `T（上）`, status: `success`, warnings: [], tabId: 1 },
+        { title: `T（下）`, status: `failed`, warnings: [], errorCode: `fill-failed` },
+      ],
+    })
+    const record = applyRun(base, split, { version: `v-a`, at: 1100, unsupportedImages: 0 })
+    expect(record.platforms.zhihu?.parts?.map(part => part.status)).toEqual([`success`, `failed`])
+    expect(record.platforms.zhihu?.draft).toEqual({ version: `v-a`, at: 1100 })
+  })
+
   it(`ignores runs that never touched the platform`, () => {
     expect(applyRun(base, run({ id: `zhihu`, status: `cancelled` }), { version: `v-a`, at: 1100, unsupportedImages: 0 })).toBe(base)
     expect(applyRun(base, run({ id: `zhihu`, status: `filling` }), { version: `v-a`, at: 1100, unsupportedImages: 0 })).toBe(base)

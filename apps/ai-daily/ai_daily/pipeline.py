@@ -193,7 +193,7 @@ def run(settings: Settings, sources: dict, *, day: date, now: datetime, http, ll
             attach_images(http, layout, out_dir, day, cfg.get("max_images", 16))
             log.info("配图：%d / %d 条有图", sum(1 for e in layout.written if e.image_path), len(layout.written))
 
-        article_md = render.render_article(layout, editor)
+        article_md = render.render_article(layout, editor, qr_code=render.relative_ref(settings.qr_code, out_dir))
         usage = "未使用（--no-llm）" if llm is None else llm.usage_summary()
         review_md = render.render_review(day, p["stem"], layout, editor, article_md, stats=stats,
                                          n_items=len(fresh), n_candidates=len(candidates), n_events=len(events),

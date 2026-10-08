@@ -148,6 +148,14 @@ const outdatedSentences = computed(() => {
 })
 
 function brief(view: PlatformView): string {
+  const text = stateBrief(view)
+  const parts = view.record?.parts?.length ?? 0
+  if (parts < 2 || view.state === `queued` || view.state === `syncing`)
+    return text
+  return `${text} · ${t(`publish.center.brief.split`, { count: parts })}`
+}
+
+function stateBrief(view: PlatformView): string {
   const record = view.record
   switch (view.state) {
     case `queued`:
@@ -180,10 +188,10 @@ async function syncPlatforms(ids: PublishPlatformId[]) {
   await publishStore.resync(ids)
 }
 
-async function openTab(id: PublishPlatformId) {
+async function openTab(id: PublishPlatformId, part?: number) {
   if (!viewedPost.value)
     return
-  if (!(await publishStore.openPlatformTab(viewedPost.value.id, id)))
+  if (!(await publishStore.openPlatformTab(viewedPost.value.id, id, part)))
     toast.info(t(`publish.center.tabClosed`))
 }
 

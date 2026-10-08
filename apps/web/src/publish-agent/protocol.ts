@@ -24,12 +24,20 @@ export const AGENT_GLOBAL = `__mdPublishAgent`
 /** Bump when the request/result shape changes, so a stale injection is detected. */
 export const AGENT_PROTOCOL_VERSION = 1
 
+/**
+ * In `AgentArticle.html` every formula is an element around its readable `$…$` source that carries
+ * the bare TeX in this attribute, so editors with their own formula nodes can rebuild it.
+ */
+export const FORMULA_TEX_ATTR = `data-tex`
+/** Marks a display formula, which is a paragraph of its own. */
+export const FORMULA_DISPLAY_ATTR = `data-tex-display`
+
 export interface AgentArticle {
   title: string
   summary: string
   /** Markdown source, leading title heading removed. */
   markdown: string
-  /** Unstyled semantic HTML; formulas degraded to their TeX source. */
+  /** Unstyled semantic HTML; formulas degraded to their TeX source (see `FORMULA_TEX_ATTR`). */
   html: string
   /** Inline-styled HTML from the WeChat copy pipeline (empty when unavailable). */
   wechatHtml: string
@@ -55,14 +63,36 @@ export interface FillReport {
   method: string
   /** Whether a "save draft" action was triggered (or the platform autosaves). */
   draftSaved: boolean
-  /** Embedded (data:) images the agent re-uploaded to the platform, when it does that. */
-  images?: { total: number, failed: number }
+  /**
+   * Why the draft was not saved, when the platform would have refused it: `images`, some never
+   * uploaded; `links`, more links than the account may have (see `links`).
+   */
+  draftBlockedBy?: `images` | `links`
+  /**
+   * The platform caps links per article for this account (Jianshu: 2 for non-members). `unwrapped`
+   * links went in as plain text to stay under `limit`; `remaining` is what the platform still counts.
+   */
+  links?: { limit: number, unwrapped: number, remaining: number }
+  /**
+   * Embedded (data:) images the agent re-uploaded to the platform, when it does that; `reasons`
+   * holds the platform's distinct error messages for the ones that still failed.
+   */
+  images?: { total: number, failed: number, reasons?: string[] }
+  /**
+   * Formulas the platform will show as formulas (its own formula nodes, or its renderer);
+   * `needsSetting` when an account setting keeps it from rendering any (Cnblogs' 启用数学公式支持).
+   */
+  formulas?: { total: number, placed: number, needsSetting?: boolean }
+  /** Set when the preferred way in failed and a cruder one filled the body, e.g. `markdown-rejected`. */
+  fallback?: string
 }
 
 export type AgentErrorCode
   = | `login-required`
     | `editor-not-found`
     | `fill-failed`
+    /** The platform refuses an article this long. */
+    | `too-long`
     | `unknown-step`
     | `version-mismatch`
     | `exception`

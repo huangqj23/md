@@ -1,5 +1,6 @@
 """渲染：正文（发布用）、审稿清单与备选（不发布）、封面 JSON。"""
 import json
+import os
 import re
 from datetime import date, datetime
 from pathlib import Path
@@ -52,9 +53,17 @@ def _tidy(md: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", md).strip() + "\n"
 
 
-def render_article(layout: Layout, editor: dict) -> str:
-    """头条 + 要闻（按分数平铺，不分栏）+ 快讯。"""
-    return _tidy(template("daily.md.j2", title=editor["titles"][0], highlights=editor["highlights"],
+def relative_ref(target: Path, from_dir: Path) -> str:
+    """正文里引用 target 的写法：相对正文目录、正斜杠，Obsidian 和 watermark.py 都认。不同盘符时写绝对路径。"""
+    try:
+        return Path(os.path.relpath(target, from_dir)).as_posix()
+    except ValueError:
+        return target.as_posix()
+
+
+def render_article(layout: Layout, editor: dict, qr_code: str | None = None) -> str:
+    """头条 + 要闻（按分数平铺，不分栏）+ 快讯；qr_code 是文末二维码相对正文的路径。"""
+    return _tidy(template("daily.md.j2", title=editor["titles"][0], highlights=editor["highlights"], qr_code=qr_code,
                           headline=layout.headline, main=layout.main, briefs=layout.briefs,
                           local_date=_local_date, others=_others))
 

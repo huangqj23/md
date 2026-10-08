@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dialog'
 import { progress as Progress } from '@/components/ui/progress'
 import { useImageUploader } from '@/composables/useImageUploader'
+import { findLocalImageFile } from '@/lib/local-image-match'
 import { useUIStore } from '@/stores/ui'
 
 const { t } = useI18n()
@@ -83,26 +84,8 @@ function handleFolderSelect(event: Event) {
   ;(event.target as HTMLInputElement).value = ''
 }
 
-/**
- * Find a matching file in the folder for a path
- */
 function findMatchedFile(path: string): File | undefined {
-  const pathFileName = path.split(/[/\\]/).pop()!.toLowerCase()
-  const fileArray = folderFiles.value
-
-  // Round 1: exact filename match
-  for (const file of fileArray) {
-    if (file.name.toLowerCase() === pathFileName)
-      return file
-  }
-  // Round 2: match without extension
-  const pathBase = pathFileName.replace(/\.[^.]+$/, '')
-  for (const file of fileArray) {
-    const fileBase = file.name.toLowerCase().replace(/\.[^.]+$/, '')
-    if (fileBase === pathBase)
-      return file
-  }
-  return undefined
+  return findLocalImageFile(path, folderFiles.value)
 }
 
 async function handleUpload() {

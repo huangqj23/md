@@ -1,4 +1,4 @@
-import type { PlatformRun, RunErrorCode, RunStatus, RunWarning } from './runner'
+import type { PartRun, PlatformRun, RunErrorCode, RunStatus, RunWarning } from './runner'
 import type { FillReport, PublishPlatformId } from '@/publish-agent/protocol'
 
 /** The per-platform log is for orientation, not an audit trail. */
@@ -50,6 +50,8 @@ export interface PlatformRecord {
   draft?: { version: string, at: number }
   /** Set by the user once they published on the platform. */
   published?: { version: string, at: number, url?: string }
+  /** The drafts of an article that went in as several parts. */
+  parts?: PartRun[]
   history: PublishEvent[]
 }
 
@@ -122,7 +124,9 @@ export function applyRun(record: PublishRecord, run: PlatformRun, context: RunCo
   if (!kind)
     return record
   const previous = record.platforms[run.id]
-  const filled = run.status === `success` || run.status === `warning`
+  const isFilled = (status: RunStatus) => status === `success` || status === `warning`
+  // A split article keeps the parts that did go in, even when another part failed.
+  const filled = isFilled(run.status) || Boolean(run.parts?.some(part => isFilled(part.status)))
   const event: PublishEvent = run.errorCode
     ? { at: context.at, kind, version: context.version, errorCode: run.errorCode }
     : { at: context.at, kind, version: context.version }
@@ -138,6 +142,7 @@ export function applyRun(record: PublishRecord, run: PlatformRun, context: RunCo
     unsupportedImages: context.unsupportedImages,
     draft: filled ? { version: context.version, at: context.at } : previous?.draft,
     published: previous?.published,
+    parts: run.parts?.map(part => ({ ...part, warnings: [...part.warnings] })),
     history: prepend(previous?.history, event),
   }
   return withPlatform(record, run.id, next, context.at)

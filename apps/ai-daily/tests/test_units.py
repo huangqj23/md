@@ -222,3 +222,10 @@ def test_display_links_drop_tracking_params_but_keep_share_codes():
         == "https://www.theatlantic.com/a/688881/?gift=abc"
     assert strip_tracking("https://e.com/p?id=1&ref=hn#sec") == "https://e.com/p?id=1#sec"
     assert strip_tracking("https://e.com/p?id=1") == "https://e.com/p?id=1"     # 没有跟踪参数：原样返回
+
+
+def test_relative_ref_points_from_the_article_to_the_brand_folder(tmp_path):
+    from ai_daily.render import relative_ref
+    vault = tmp_path / "vault"
+    qr = vault / "_brand" / "hollis23" / "wechat-qrcode_nowm_wxonly.png"
+    assert relative_ref(qr, vault / "AI_Daily" / "2026-10") == "../../_brand/hollis23/wechat-qrcode_nowm_wxonly.png"

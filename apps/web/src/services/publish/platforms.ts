@@ -35,6 +35,17 @@ export interface PublishPlatform {
   format: ContentFormat
   /** The platform rejects or trims longer titles. */
   titleMaxLength?: number
+  /** Longest body the platform takes, counted like `AgentArticle.textLength`; longer articles go in several parts. */
+  bodyMaxLength?: number
+  /** The editor has no tables, so each one goes in as an image of itself. */
+  tablesAsImages?: boolean
+  /**
+   * The editor strips the SVG formulas of the WeChat HTML and makes every image its own block:
+   * display formulas go in as images of themselves, inline ones as plain text.
+   */
+  plainFormulas?: boolean
+  /** Longer than the runner's default for editors that upload every image while the agent waits. */
+  stepTimeout?: number
   /** Saves the draft on its own once content is in the editor. */
   autosave: boolean
   detectLogin: (ctx: DetectContext) => Promise<LoginInfo>
@@ -86,8 +97,11 @@ export const PUBLISH_PLATFORMS: readonly PublishPlatform[] = [
     hostPermissions: [`https://*.zhihu.com/*`],
     loginCheckUrl: `https://www.zhihu.com/api/v4/me`,
     loginUrlPattern: /zhihu\.com\/(?:signin|signup)/,
-    format: `markdown`,
+    // Pasted as rich text: Zhihu's Markdown parse runs on its server, gives up after 5 s and then
+    // leaves the editor empty (see publish-agent/platforms/zhihu.ts).
+    format: `html`,
     titleMaxLength: 100,
+    bodyMaxLength: 40000,
     autosave: true,
     async detectLogin(ctx) {
       const { status, data } = await ctx.fetchJson(this.loginCheckUrl)
@@ -148,6 +162,12 @@ export const PUBLISH_PLATFORMS: readonly PublishPlatform[] = [
     loginUrlPattern: /toutiao\.com\/auth\/page\/login|sso\.toutiao\.com/,
     format: `html`,
     titleMaxLength: 30,
+    // Toutiao will not even save a long article: at 36,682 characters every save and publish failed
+    // with code 5009 (pgc_id 0), while its first half saved (2026-10-08). The exact limit is not
+    // published; 20,000 keeps each part at about the size that worked.
+    bodyMaxLength: 20000,
+    // The agent puts every image on Toutiao's image host before the paste.
+    stepTimeout: 240000,
     autosave: true,
     async detectLogin(ctx) {
       const { data } = await ctx.fetchJson(this.loginCheckUrl)
@@ -167,6 +187,14 @@ export const PUBLISH_PLATFORMS: readonly PublishPlatform[] = [
     loginUrlPattern: /baijiahao\.baidu\.com\/builder\/theme\/bjh\/login|passport\.baidu\.com/,
     format: `wechat-html`,
     titleMaxLength: 64,
+    // Publishing redraws every table on Baijiahao's side, and pasted ones fail with
+    // "表格生成有问题, 请重新制作表格或稍候再试"; as pictures they go up like any other image.
+    tablesAsImages: true,
+    // UEditor drops the MathJax SVGs, leaving a blank where each formula was, and turns every image
+    // into a captioned block, so an inline formula picture would split its sentence.
+    plainFormulas: true,
+    // Embedded images (tables and display formulas included) are uploaded to the material library before the body goes in.
+    stepTimeout: 300000,
     autosave: false,
     async detectLogin(ctx) {
       const { data } = await ctx.fetchJson(this.loginCheckUrl)
@@ -185,6 +213,8 @@ export const PUBLISH_PLATFORMS: readonly PublishPlatform[] = [
     loginCheckUrl: `https://www.jianshu.com/settings/basic.json`,
     loginUrlPattern: /jianshu\.com\/sign_in/,
     format: `markdown`,
+    // Embedded images are uploaded one by one before the body goes in.
+    stepTimeout: 300000,
     autosave: true,
     async detectLogin(ctx) {
       const { status, data } = await ctx.fetchJson(this.loginCheckUrl)
@@ -197,13 +227,20 @@ export const PUBLISH_PLATFORMS: readonly PublishPlatform[] = [
   {
     id: `bilibili`,
     homeUrl: `https://passport.bilibili.com/login`,
-    startUrl: `https://member.bilibili.com/article-text/home?newEditor=-1`,
+    // Both earlier column editors (UEditor `article-text/home?newEditor=-1`, Quill `/read/editor/#/web`)
+    // were retired in 2026 and only show a notice pointing here, the Tiptap editor.
+    startUrl: `https://member.bilibili.com/york/read-editor`,
     startStep: `fill`,
     hostPermissions: [`https://*.bilibili.com/*`],
     loginCheckUrl: `https://api.bilibili.com/x/web-interface/nav`,
     loginUrlPattern: /passport\.bilibili\.com/,
-    format: `wechat-html`,
-    titleMaxLength: 40,
+    format: `html`,
+    // The editor takes its limit from `opus_init_check` (`max_title_len`: 50; 40 is only its fallback).
+    titleMaxLength: 50,
+    // The Tiptap editor has no table node: a pasted table becomes one run-on paragraph.
+    tablesAsImages: true,
+    // Each pasted image (tables included) is uploaded in the page, and failed ones are retried one by one.
+    stepTimeout: 300000,
     autosave: false,
     async detectLogin(ctx) {
       const { data } = await ctx.fetchJson(this.loginCheckUrl)

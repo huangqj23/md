@@ -59,11 +59,59 @@ describe(`recordChecks`, () => {
     expect(unsupported).toContainEqual({ level: `warn`, key: `imagesUnsupported`, params: { count: 5 } })
   })
 
+  it(`passes on the platform's reasons for images that did not upload`, () => {
+    const bilibili = getPublishPlatform(`bilibili`)
+    const failed = recordChecks(bilibili, platformRecord({ report: { ...report, images: { total: 9, failed: 2, reasons: [`请求过于频繁`, `图片格式不支持`] } } }))
+    expect(failed).toContainEqual({ level: `warn`, key: `imagesNotUploaded`, params: { total: 9, failed: 2, reasons: `请求过于频繁；图片格式不支持` } })
+    const quiet = recordChecks(bilibili, platformRecord({ report: { ...report, images: { total: 9, failed: 2 } } }))
+    expect(quiet).toContainEqual({ level: `warn`, key: `imagesNotUploaded`, params: { total: 9, failed: 2 } })
+  })
+
+  it(`says whether every formula became one of the platform's own`, () => {
+    const bilibili = getPublishPlatform(`bilibili`)
+    expect(recordChecks(bilibili, platformRecord({ report: { ...report, formulas: { total: 12, placed: 12 } } })))
+      .toContainEqual({ level: `ok`, key: `formulasPlaced`, params: { total: 12 } })
+    expect(recordChecks(bilibili, platformRecord({ report: { ...report, formulas: { total: 12, placed: 9 } } })))
+      .toContainEqual({ level: `warn`, key: `formulasNotPlaced`, params: { total: 12, missing: 3 } })
+  })
+
+  it(`points to the account setting when the platform will not render formulas at all`, () => {
+    const checks = recordChecks(cnblogs, platformRecord({ report: { ...report, formulas: { total: 7, placed: 0, needsSetting: true } } }))
+    expect(checks).toContainEqual({ level: `warn`, key: `formulasNeedSetting`, params: { total: 7 } })
+    expect(checks.some(check => check.key === `formulasNotPlaced`)).toBe(false)
+  })
+
+  it(`notes links a platform never takes as plain information, not a warning`, () => {
+    const checks = recordChecks(toutiao, platformRecord({ report: { ...report, links: { limit: 0, unwrapped: 12, remaining: 0 } } }))
+    expect(checks).toContainEqual({ level: `ok`, key: `linksNotAllowed`, params: { count: 12 } })
+    expect(checks.some(check => check.key === `linksUnwrapped`)).toBe(false)
+  })
+
   it(`tells a saved draft from an autosaving platform from one that needs saving by hand`, () => {
     const last = (checks: Check[]) => checks[checks.length - 1]
     expect(last(recordChecks(cnblogs, platformRecord({ report: { ...report, draftSaved: true } }))).key).toBe(`draftSaved`)
     expect(last(recordChecks(toutiao, platformRecord())).key).toBe(`autosave`)
     expect(last(recordChecks(cnblogs, platformRecord()))).toEqual({ level: `warn`, key: `draftNotSaved` })
+  })
+
+  it(`says the draft waits on the images when the platform could not save it with some unsent`, () => {
+    const checks = recordChecks(getPublishPlatform(`bilibili`), platformRecord({ report: { ...report, images: { total: 9, failed: 1 }, draftBlockedBy: `images` } }))
+    expect(checks[checks.length - 1]).toEqual({ level: `warn`, key: `draftBlockedByImages` })
+    expect(checks.some(check => check.key === `draftNotSaved`)).toBe(false)
+  })
+
+  it(`flags a body that went in by a fallback`, () => {
+    const checks = recordChecks(getPublishPlatform(`zhihu`), platformRecord({ status: `warning`, warnings: [`fill-fallback`] }))
+    expect(checks).toContainEqual({ level: `warn`, key: `fallback` })
+  })
+
+  it(`says when the article went in as several parts`, () => {
+    const parts = [{ title: `T（上）`, status: `success` as const, warnings: [] }, { title: `T（下）`, status: `success` as const, warnings: [] }]
+    const checks = recordChecks(getPublishPlatform(`zhihu`), platformRecord({ parts }))
+    expect(checks[0]).toEqual({ level: `ok`, key: `split`, params: { count: 2, limit: 40000 } })
+    expect(checks.filter(check => check.level === `warn`)).toEqual([])
+    // Toutiao cannot save a long article at all, so it splits much earlier.
+    expect(recordChecks(toutiao, platformRecord({ parts }))[0]).toEqual({ level: `ok`, key: `split`, params: { count: 2, limit: 20000 } })
   })
 
   it(`reduces a failure to its error`, () => {

@@ -55,6 +55,13 @@ collect（官方博客 / 国内大模型公司的官方渠道 / 海外媒体 / n
 
 都是第三方图：文件名带 `_nowm`（只内嵌、不加水印），图源接在图片下面第一段末尾的括号里：“（图源：网站名 / X @账号）”，不单独一行。
 
+## 文末页脚
+
+正文最后是“图片版权归原作者，出处见图注。”、关注**Hollis的视觉大模型实战**的宣传语（`templates/daily.md.j2`）和公众号二维码名片。二维码引用 vault 品牌目录里的 `_brand/hollis23/wechat-qrcode_nowm_wxonly.png`（相对正文写成 `../../_brand/hollis23/…`）：
+
+- 文件不在时，`ai-daily publish` 的检查会报“图片不存在”，内嵌版不会带坏链接；
+- `_nowm`：内嵌时不加水印；`_wxonly`：内嵌时带 `data-publish-only="wechat"`，md 多平台同步时只发公众号，其他平台去掉二维码、保留文字。
+
 ## 安装
 
 ```powershell
