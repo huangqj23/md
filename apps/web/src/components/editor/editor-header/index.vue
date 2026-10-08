@@ -31,6 +31,7 @@ const SyncDialog = defineAsyncComponent(() => import('./SyncDialog.vue'))
 const ShareDialog = defineAsyncComponent(() => import('./ShareDialog.vue'))
 const PdfExportDialog = defineAsyncComponent(() => import('@/components/editor/dialogs/PdfExportDialog.vue'))
 const PublishDialog = defineAsyncComponent(() => import('./PublishDialog.vue'))
+const PublishCenter = defineAsyncComponent(() => import('./PublishCenter.vue'))
 const AiDailyDialog = defineAsyncComponent(() => import('./AiDailyDialog.vue'))
 
 // Inside the extension the editor publishes by itself; the web build keeps the COSE integration.
@@ -48,7 +49,7 @@ const { editorRefresh } = useEditorRefresh()
 const { editor } = storeToRefs(editorStore)
 const { output } = storeToRefs(renderStore)
 const { primaryColor } = storeToRefs(themeStore)
-const { isOpenRightSlider, isShowSyncDialog, isShowAccountDialog, isShowShareDialog, isShowPublishDialog, isShowAiDailyDialog, isShowPdfExportDialog, isShowAboutDialog, isShowFundDialog, isShowEditorStateDialog, isShowPreferencesDialog, isShowMarkdownHelpDialog, isShowKeyboardShortcutsDialog, copyMode } = storeToRefs(uiStore)
+const { isOpenRightSlider, isShowSyncDialog, isShowAccountDialog, isShowShareDialog, isShowPublishDialog, isShowPublishCenter, isShowAiDailyDialog, isShowPdfExportDialog, isShowAboutDialog, isShowFundDialog, isShowEditorStateDialog, isShowPreferencesDialog, isShowMarkdownHelpDialog, isShowKeyboardShortcutsDialog, copyMode } = storeToRefs(uiStore)
 
 const isCopying = ref(false)
 
@@ -323,6 +324,7 @@ function copyToWeChat() {
   <ShareDialog v-if="isShowShareDialog" v-model:open="isShowShareDialog" />
   <PdfExportDialog v-if="isShowPdfExportDialog" v-model:open="isShowPdfExportDialog" />
   <PublishDialog v-if="nativePublish && isShowPublishDialog" v-model:open="isShowPublishDialog" />
+  <PublishCenter v-if="nativePublish && isShowPublishCenter" v-model:open="isShowPublishCenter" />
   <AiDailyDialog v-if="aiDaily && isShowAiDailyDialog" v-model:open="isShowAiDailyDialog" />
 </template>
 

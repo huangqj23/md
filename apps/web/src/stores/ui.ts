@@ -142,9 +142,19 @@ export const useUIStore = defineStore(`ui`, () => {
   }
 
   const isShowPublishDialog = ref(false)
+  const isShowPublishCenter = ref(false)
+  /** Post the publish center opens on; null means the current post. */
+  const publishCenterPostId = ref<string | null>(null)
 
   function openPublishDialog() {
+    isShowPublishCenter.value = false
     isShowPublishDialog.value = true
+  }
+
+  function openPublishCenter(postId: string | null = null) {
+    publishCenterPostId.value = postId
+    isShowPublishDialog.value = false
+    isShowPublishCenter.value = true
   }
 
   const isShowAiDailyDialog = ref(false)
@@ -301,6 +311,9 @@ export const useUIStore = defineStore(`ui`, () => {
     openShareDialog,
     isShowPublishDialog,
     openPublishDialog,
+    isShowPublishCenter,
+    publishCenterPostId,
+    openPublishCenter,
     isShowAiDailyDialog,
     openAiDailyDialog,
     isShowPdfExportDialog,
