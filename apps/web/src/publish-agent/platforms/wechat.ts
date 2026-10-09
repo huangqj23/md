@@ -16,7 +16,8 @@ import {
   waitForStable,
 } from '../dom'
 import { done, editorMissing, fail, navigate } from '../result'
-import { createWechatUploader, uploadEmbeddedImages } from './wechat-images'
+import { UPLOAD_WITHIN_STEP, uploadHtmlImages } from './platform-images'
+import { createWechatUploader, isWechatImage } from './wechat-images'
 
 interface MpEditorJsApi {
   invoke: (options: {
@@ -172,17 +173,20 @@ async function fill(article: AgentArticle): Promise<AgentResult> {
     setFieldValue(digest, article.summary)
 
   const session = readWechatSession()
-  const images = await uploadEmbeddedImages(
+  // Articles only show images from WeChat's own CDN: embedded ones and ones on an image host
+  // (md uploads embedded images there before syncing) go into the account's image library first.
+  const images = await uploadHtmlImages(
     article.wechatHtml || article.html,
     session ? createWechatUploader(session) : async () => null,
+    { ...UPLOAD_WITHIN_STEP, isHosted: isWechatImage },
   )
 
   const editor = pickWechatBodyEditor() ?? legacyBody() ?? bodyEditor
   let method = `jsapi`
-  if (!(await setContentViaJsApi(images.html))) {
+  if (!(await setContentViaJsApi(images.text))) {
     method = `paste`
     editor.focus()
-    dispatchPaste(editor, { html: images.html })
+    dispatchPaste(editor, { html: images.text })
   }
 
   const bodyLength = await waitForStable(() => elementTextChars(pickWechatBodyEditor() ?? legacyBody() ?? editor))
@@ -192,7 +196,7 @@ async function fill(article: AgentArticle): Promise<AgentResult> {
     expectedLength: article.textLength,
     method,
     draftSaved: false,
-    ...(images.total > 0 ? { images: { total: images.total, failed: images.failed } } : {}),
+    ...(images.total > 0 ? { images: { total: images.total, failed: images.failed, ...(images.reasons ? { reasons: images.reasons } : {}) } } : {}),
   }
   if (bodyLength === 0 && article.textLength > 0)
     return fail(`fill-failed`, `The editor stayed empty after inserting the article`, report)

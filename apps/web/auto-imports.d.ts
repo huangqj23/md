@@ -412,7 +412,7 @@ declare global {
   export type { Post } from './src/stores/post'
   import('./src/stores/post')
   // @ts-ignore
-  export type { PublishInput } from './src/stores/publish'
+  export type { ImageHostingState, PublishInput } from './src/stores/publish'
   import('./src/stores/publish')
   // @ts-ignore
   export type { QuickCommandPersisted, QuickCommandRuntime } from './src/stores/quickCommands'

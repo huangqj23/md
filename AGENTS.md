@@ -29,6 +29,8 @@
 
 `apps/ai-daily` 是 Python 项目（AI 早报流水线，见其 README），不在 pnpm workspace 内，也不参与 ESLint；浏览器扩展的「AI 早报」面板通过 Native Messaging 调用它（见 [docs/ai-daily.md](./docs/ai-daily.md)）。测试：`apps/ai-daily/.venv/Scripts/python -m pytest`。
 
+`apps/ai-video` 也是 Python 项目（AI 短视频流水线，目前是 Phase 0 模型对比测试，见其 README），同样不在 pnpm workspace 内。测试：`apps/ai-video/.venv/Scripts/python -m pytest`。
+
 ## 常用命令
 
 ### 根目录

@@ -58,8 +58,17 @@ function replaceTablesInOrder(html: string, images: readonly (string | null)[]):
 }
 
 const SHOT_CLASS = `md-publish-table-shot`
-/** Layout width the table gets before it is drawn; wider tables keep their own width. */
-const SHOT_WIDTH = 960
+
+/** How a table is drawn. */
+export interface TableDrawing {
+  /** Layout width the table gets before it is drawn, in CSS pixels; wider tables keep their own width. */
+  width: number
+  /** Image pixels per CSS pixel. */
+  pixelRatio: number
+}
+
+/** Sharp on high-DPI screens, for editors that fit a picture to their column. */
+const SHOT: TableDrawing = { width: 960, pixelRatio: 2 }
 
 const SHOT_STYLE = `
 .${SHOT_CLASS} { display: inline-block; padding: 12px; background: #fff; color: #1f2329;
@@ -91,9 +100,9 @@ function drawFormulas(root: HTMLElement) {
 }
 
 /** Draws a table off screen with plain styles: a PNG data URL, or null if the browser could not. */
-export async function renderTableImage(table: HTMLTableElement): Promise<string | null> {
+export async function renderTableImage(table: HTMLTableElement, drawing: TableDrawing = SHOT): Promise<string | null> {
   const host = document.createElement(`div`)
-  host.style.cssText = `position:fixed;left:-100000px;top:0;width:${SHOT_WIDTH}px;pointer-events:none;z-index:-1`
+  host.style.cssText = `position:fixed;left:-100000px;top:0;width:${drawing.width}px;pointer-events:none;z-index:-1`
   const style = document.createElement(`style`)
   style.textContent = SHOT_STYLE
   const shot = document.createElement(`div`)
@@ -106,7 +115,7 @@ export async function renderTableImage(table: HTMLTableElement): Promise<string 
     const { toPng } = await import(`html-to-image`)
     return await toPng(shot, {
       backgroundColor: `#ffffff`,
-      pixelRatio: 2,
+      pixelRatio: drawing.pixelRatio,
       skipFonts: true,
       // A table wider than the layout width overflows its box; capture all of it.
       width: Math.ceil(Math.max(shot.scrollWidth, shot.offsetWidth)),

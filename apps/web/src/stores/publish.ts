@@ -1,21 +1,26 @@
 import type { AgentArticle, PublishPlatformId } from '@/publish-agent/protocol'
+import type { HostingReport } from '@/services/publish/hosting'
 import type { LoginInfo, PublishPlatform } from '@/services/publish/platforms'
 import type { PublishRecord } from '@/services/publish/records'
 import type { PlatformRun, RunStatus } from '@/services/publish/runner'
+import type { UploadProviderId } from '@/services/upload/provider-registry'
+import { useImageUploader } from '@/composables/useImageUploader'
 import { getLocale, t } from '@/i18n/translate'
 import { PUBLISH_PLATFORM_IDS } from '@/publish-agent/protocol'
 import { processClipboardContent } from '@/services/export'
 import { auditImages, buildAgentArticle, extractMarkdownTitle, extractSummary, withoutWechatOnly } from '@/services/publish/article'
 import { isLiveStatus } from '@/services/publish/center'
 import { createPublishTabsApi, getExtensionGlobal } from '@/services/publish/extension-api'
-import { withPlainFormulas } from '@/services/publish/formulas'
+import { renderFormulaImage, withDisplayFormulaImages, withPlainFormulas } from '@/services/publish/formulas'
+import { canHostImages, createImageHosting, toUploadFile } from '@/services/publish/hosting'
 import { createDetectContext, detectLoginStates } from '@/services/publish/login'
 import { hasPublishPermissions, matchesPattern, requestPublishPermissions } from '@/services/publish/permissions'
 import { getPublishPlatform, PUBLISH_PLATFORMS } from '@/services/publish/platforms'
 import { applyRun, beginSync, contentHash, markPublished, unmarkPublished } from '@/services/publish/records'
 import { runPublish } from '@/services/publish/runner'
-import { splitArticle } from '@/services/publish/split'
-import { withTablesAsImages } from '@/services/publish/tables'
+import { htmlBytes, splitArticle } from '@/services/publish/split'
+import { renderTableImage, withTablesAsImages } from '@/services/publish/tables'
+import { resolveUploadProvider } from '@/services/upload/provider-registry'
 import { store } from '@/storage'
 import { addPrefix } from '@/storage/prefix'
 import { useEditorStore } from '@/stores/editor'
@@ -24,6 +29,13 @@ import { useRenderStore } from '@/stores/render'
 import { useThemeStore } from '@/stores/theme'
 
 const DEFAULT_SELECTION: PublishPlatformId[] = [`wechat`, `zhihu`, `csdn`, `juejin`]
+
+export interface ImageHostingState extends HostingReport {
+  postId: string
+  host: UploadProviderId
+  /** Every image the sync needs is on the image host or kept embedded; the platforms come next. */
+  finished: boolean
+}
 
 export interface PublishInput {
   title: string
@@ -49,9 +61,11 @@ function splitMessages() {
 async function splitForLimits(platforms: readonly PublishPlatform[], article: AgentArticle): Promise<Partial<Record<PublishPlatformId, AgentArticle[]>>> {
   const result: Partial<Record<PublishPlatformId, AgentArticle[]>> = {}
   for (const platform of platforms) {
-    if (!platform.bodyMaxLength || article.textLength <= platform.bodyMaxLength)
+    const limit = platform.bodyMaxBytes ?? platform.bodyMaxLength
+    const measure = platform.bodyMaxBytes ? htmlBytes : undefined
+    if (!limit || (measure ? await measure(article.markdown) : article.textLength) <= limit)
       continue
-    const parts = await splitArticle(article, { limit: platform.bodyMaxLength, titleMaxLength: platform.titleMaxLength, ...splitMessages() })
+    const parts = await splitArticle(article, { limit, measure, titleMaxLength: platform.titleMaxLength, ...splitMessages() })
     if (parts)
       result[platform.id] = parts
     else
@@ -60,32 +74,55 @@ async function splitForLimits(platforms: readonly PublishPlatform[], article: Ag
   return result
 }
 
+/** Drawings already made, by the article drawn on and how; platforms that draw alike share them. */
+type Drawings = WeakMap<AgentArticle, Map<string, Promise<AgentArticle>>>
+
+function needsDrawing(platform: PublishPlatform): boolean {
+  return Boolean(platform.tablesAsImages || platform.plainFormulas || platform.displayFormulasAsImages)
+}
+
 /**
- * WeChat keeps the article with its QR code; editors without tables get every table drawn as an
- * image, and editors that strip SVG get display formulas drawn as images and inline ones as text.
+ * Editors without tables get every table drawn as an image, editors that strip SVG get display
+ * formulas drawn as images and inline ones as text, and editors without formulas that take the
+ * plain HTML get display formulas drawn as images.
  */
+async function drawnFor(platform: PublishPlatform, source: AgentArticle, drawings: Drawings): Promise<AgentArticle> {
+  const { table, formula } = platform.pictures ?? {}
+  const draw = (from: AgentArticle, key: string, work: () => Promise<AgentArticle>) => {
+    let done = drawings.get(from)
+    if (!done)
+      drawings.set(from, done = new Map())
+    if (!done.has(key))
+      done.set(key, work())
+    return done.get(key)!
+  }
+  let prepared = source
+  if (platform.tablesAsImages) {
+    const from = prepared
+    prepared = await draw(from, `tables${JSON.stringify(table ?? null)}`, () => withTablesAsImages(from, table && (cells => renderTableImage(cells, table))))
+  }
+  if (platform.plainFormulas) {
+    const from = prepared
+    prepared = await draw(from, `plain${JSON.stringify(formula ?? null)}`, () => withPlainFormulas(from, formula && (svg => renderFormulaImage(svg, formula))))
+  }
+  if (platform.displayFormulasAsImages) {
+    const from = prepared
+    prepared = await draw(from, `display${JSON.stringify(formula ?? null)}`, () => withDisplayFormulaImages(from, formula && (svg => renderFormulaImage(svg, formula))))
+  }
+  return prepared
+}
+
+/** WeChat keeps the article with its QR code; the others that need tables or formulas drawn get them drawn. */
 async function articlesByPlatform(
   platforms: readonly PublishPlatform[],
   article: AgentArticle,
   elsewhere: AgentArticle,
+  drawings: Drawings,
 ): Promise<Partial<Record<PublishPlatformId, AgentArticle>>> {
   const result: Partial<Record<PublishPlatformId, AgentArticle>> = { wechat: article }
-  // Each drawing is done once and shared by the platforms that need it.
-  let tables: Promise<AgentArticle> | undefined
-  const formulas = new Map<AgentArticle, Promise<AgentArticle>>()
   for (const platform of platforms) {
-    if (!platform.tablesAsImages && !platform.plainFormulas)
-      continue
-    let prepared = elsewhere
-    if (platform.tablesAsImages)
-      prepared = await (tables ??= withTablesAsImages(elsewhere))
-    if (platform.plainFormulas) {
-      const source = prepared
-      if (!formulas.has(source))
-        formulas.set(source, withPlainFormulas(source))
-      prepared = await formulas.get(source)!
-    }
-    result[platform.id] = prepared
+    if (needsDrawing(platform))
+      result[platform.id] = await drawnFor(platform, elsewhere, drawings)
   }
   return result
 }
@@ -110,6 +147,8 @@ export const usePublishStore = defineStore(`publish`, () => {
   const runPostId = ref<string | null>(null)
   const running = ref(false)
   const cancelRequested = ref(false)
+  /** The latest sync's uploads to the image host, for the publish center; null when it uploaded nothing. */
+  const imageHosting = ref<ImageHostingState | null>(null)
 
   const selectedPlatforms = computed<PublishPlatform[]>(() =>
     PUBLISH_PLATFORMS.filter(platform => selectedIds.value.includes(platform.id)),
@@ -159,13 +198,13 @@ export const usePublishStore = defineStore(`publish`, () => {
     }
   }
 
-  /** Images only WeChat can take: embedded (data:) ones and local paths. */
-  function countUnsupportedImages(): number {
-    const output = renderedOutput()
-    if (!output)
-      return 0
-    const audit = auditImages(output)
-    return audit.embedded + audit.local
+  /**
+   * The image host set up in the editor's image-host settings, when it is one every platform can
+   * fetch from: embedded images then go there before syncing. Null keeps them embedded.
+   */
+  async function imageHost(): Promise<UploadProviderId | null> {
+    const provider = resolveUploadProvider(await store.get(`imgHost`)).id
+    return canHostImages(provider) ? provider : null
   }
 
   /** WeChat-styled HTML, produced exactly like the "copy" button does. */
@@ -213,12 +252,17 @@ export const usePublishStore = defineStore(`publish`, () => {
     const postId = postStore.currentPostId
     const markdown = editorStore.getContent()
     const version = contentHash(markdown)
-    const unsupportedImages = countUnsupportedImages()
+    const output = renderedOutput()
+    const audit = output ? auditImages(output) : null
+    const host = await imageHost()
+    // Images only WeChat can take: local paths, and embedded ones unless they go to the image host.
+    let unsupportedImages = audit ? audit.local + (host ? 0 : audit.embedded) : 0
     const defaults = articleDefaults()
 
     running.value = true
     cancelRequested.value = false
     runPostId.value = postId
+    imageHosting.value = null
     runs.value = platforms.map(platform => ({ id: platform.id, status: `queued`, warnings: [] }))
     saveRecord(beginSync(records.value[postId], {
       postId,
@@ -230,20 +274,57 @@ export const usePublishStore = defineStore(`publish`, () => {
       at: Date.now(),
     }))
     try {
-      const article = await buildAgentArticle({
+      const built = await buildAgentArticle({
         title: input.title,
         summary: input.summary,
         markdown,
         wechatHtml: await collectWechatHtml(),
       })
+      // Every platform gets links to the image host; those that keep images on their own host
+      // (WeChat, Toutiao, Baijiahao, Bilibili) fetch them from there.
+      const hosting = host
+        ? createImageHosting(async dataUrl => useImageUploader().upload(await toUploadFile(dataUrl)), {
+            onProgress: (report) => {
+              imageHosting.value = { ...report, postId, host, finished: false }
+            },
+          })
+        : null
+      const article = hosting ? await hosting.hostArticle(built) : built
       // Only the WeChat article keeps the account's QR code; other platforms count it as off-site promotion.
       const elsewhere = withoutWechatOnly(article)
+      const drawings: Drawings = new WeakMap()
+      const articles = await articlesByPlatform(platforms, article, elsewhere, drawings)
+      // Each part is drawn for its platform like a whole article would be.
+      const parts = await splitForLimits(platforms, elsewhere)
+      for (const platform of platforms) {
+        const split = parts[platform.id]
+        if (!split || !needsDrawing(platform))
+          continue
+        const drawn: AgentArticle[] = []
+        for (const part of split)
+          drawn.push(await drawnFor(platform, part, drawings))
+        parts[platform.id] = drawn
+      }
+      if (hosting && host) {
+        // Tables and formulas drawn as pictures for some platforms come back embedded.
+        for (const [id, prepared] of Object.entries(articles) as [PublishPlatformId, AgentArticle][])
+          articles[id] = await hosting.hostArticle(prepared)
+        for (const [id, split] of Object.entries(parts) as [PublishPlatformId, AgentArticle[]][]) {
+          const hosted: AgentArticle[] = []
+          for (const part of split)
+            hosted.push(await hosting.hostArticle(part))
+          parts[id] = hosted
+        }
+        const report = hosting.report()
+        imageHosting.value = report.total ? { ...report, postId, host, finished: true } : null
+        unsupportedImages = (audit?.local ?? 0) + report.failed
+      }
       const time = new Date().toLocaleTimeString(getLocale(), { hour: `2-digit`, minute: `2-digit` })
       const results = await runPublish(platforms, elsewhere, {
         api: createPublishTabsApi(ext),
         groupTitle: t(`publish.groupTitle`, { time }),
-        articles: await articlesByPlatform(platforms, article, elsewhere),
-        parts: await splitForLimits(platforms, elsewhere),
+        articles,
+        parts,
         shouldCancel: () => cancelRequested.value,
         onUpdate: (run) => {
           const index = runs.value.findIndex(item => item.id === run.id)
@@ -342,11 +423,13 @@ export const usePublishStore = defineStore(`publish`, () => {
     runPostId,
     running,
     cancelRequested,
+    imageHosting,
     setSelected,
     hasPermissions,
     requestPermissions,
     refreshLoginStates,
     articleDefaults,
+    imageHost,
     publish,
     resync,
     cancel,

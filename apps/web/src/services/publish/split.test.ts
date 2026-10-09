@@ -100,6 +100,15 @@ describe(`splitArticle`, () => {
     expect(parts?.every(part => [...part.title].length <= 20 && part.title.endsWith(`）`))).toBe(true)
   })
 
+  it(`measures parts with the option's measure when given, e.g. in bytes`, async () => {
+    // Three UTF-8 bytes per 字: 3800 字 is over 11400 bytes, and no two runs of sections fit 6000 each.
+    const bytes = async (markdown: string) => new TextEncoder().encode(markdown.replace(/\s+/g, ``)).length
+    const parts = await splitArticle(article, { ...options, limit: 6000, measure: bytes }, deps)
+    expect(parts).toHaveLength(3)
+    for (const part of parts!)
+      expect(await bytes(part.markdown)).toBeLessThanOrEqual(6000)
+  })
+
   it(`uses more parts when two would still be over the limit`, async () => {
     const parts = await splitArticle(article, { ...options, limit: 1700 }, deps)
     expect(parts).toHaveLength(3)

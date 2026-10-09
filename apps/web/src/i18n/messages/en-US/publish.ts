@@ -45,6 +45,8 @@ export default {
     images: {
       title: `{count} images may not show on other platforms`,
       description: `WeChat uploads embedded (base64) images automatically; other platforms reject embedded images and local paths, so upload them to an image host first to get public links.`,
+      hostedTitle: `{count} embedded images will be uploaded to your image host ({host}) first`,
+      hostedDescription: `They are uploaded once before syncing, so every platform gets image links; images uploaded before are reused. The host must allow cross-origin reads (CORS): WeChat, Toutiao, Baijiahao and Bilibili copy linked images onto their own hosts.`,
     },
     start: `Sync as drafts`,
     stop: `Stop`,
@@ -92,6 +94,12 @@ export default {
       progress: `Published {published} / {total}`,
       progressDetail: `{pending} to publish · {failed} failed`,
       progressSyncing: `{count} syncing`,
+      hosting: {
+        uploading: `Uploading images to your image host ({host})`,
+        count: `{done} / {total}`,
+        done: `{total} images are on your image host ({host}); every platform gets image links`,
+        failed: `{failed}/{total} images did not reach your image host ({host}) and sync embedded: {reasons}`,
+      },
       outdated: {
         intro: `The article changed since the last sync.`,
         drafts: `The drafts on {names} are an older version.`,
@@ -145,6 +153,7 @@ export default {
         draftNotSaved: `save by hand`,
         draftBlockedByImages: `draft not saved`,
         draftBlockedByLinks: `too many links to save`,
+        draftUnsaved: `draft is empty`,
       },
       detailLabel: `{name} details`,
       sentence: {
@@ -198,7 +207,9 @@ export default {
         draftNotSaved: `Save the draft on that platform yourself`,
         draftBlockedByImages: `The platform cannot save the draft while some images are not uploaded: click "Re-upload" (重新上传) on each failed image in the editor, then save the draft`,
         draftBlockedByLinks: `The body still has {count} URLs, over this account's limit of {limit} links per article (Jianshu's limit for non-members), so the platform will not save the draft: delete the extra URLs in the editor and it saves on its own`,
+        draftUnsaved: `The platform's draft has no body yet (it read back empty after the sync): change any character in the editor so it saves on its own, or sync again`,
         split: `Over the platform's {limit}-character limit, so it went in as {count} posts; publish them in order`,
+        splitBytes: `The body is over the platform's storage limit of about {limit} KB per post, so it went in as {count} posts split at headings; publish them in order`,
       },
       mark: {
         label: `Published it on the platform? Mark it here`,

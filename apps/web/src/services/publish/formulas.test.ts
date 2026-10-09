@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { AgentArticle } from '@/publish-agent/protocol'
 import { describe, expect, it, vi } from 'vitest'
-import { withPlainFormulas } from './formulas'
+import { withDisplayFormulaImages, withPlainFormulas } from './formulas'
 
 const base: AgentArticle = { title: `T`, summary: ``, markdown: `md`, html: `<p>plain</p>`, wechatHtml: ``, textLength: 5 }
 
@@ -54,6 +54,42 @@ describe(`withPlainFormulas`, () => {
     expect(await withPlainFormulas(base, render)).toBe(base)
     const noFormulas = { ...base, wechatHtml: `<p>x</p>` }
     expect(await withPlainFormulas(noFormulas, render)).toBe(noFormulas)
+    expect(render).not.toHaveBeenCalled()
+  })
+})
+
+describe(`withDisplayFormulaImages`, () => {
+  /** A display formula as `AgentArticle.html` carries it (see `degradeFormulas`). */
+  const holder = (tex: string) => `<p data-tex="${tex}" data-tex-display="">$$${tex}$$</p>`
+
+  it(`draws each display formula of the HTML from its SVG in the WeChat HTML, keeping its holder`, async () => {
+    const html = `<p>见 <span data-tex="x">$x$</span></p>${holder(`L = -\\log p`)}<p>再</p>${holder(`L = -\\log p`)}${holder(`y`)}`
+    const wechatHtml = `${block(`$$L = -\\log p$$`, `M1 1`)}${block(`$$y$$`, `M2 2`)}`
+    const render = vi.fn(async (svg: SVGSVGElement) => drawnAs(`data:image/png;base64,${svg.querySelector(`path`)!.getAttribute(`d`)!.replace(/\W/g, ``)}`))
+
+    const result = await withDisplayFormulaImages({ ...base, html, wechatHtml }, render)
+
+    expect(render).toHaveBeenCalledTimes(2)
+    expect(result.html).toBe(
+      `<p>见 <span data-tex="x">$x$</span></p>`
+      + `<p data-tex="L = -\\log p" data-tex-display="" style="text-align: center;"><img src="data:image/png;base64,M11" alt="$$L = -\\log p$$" width="320" height="48" style="width: 320.4px; height: 48.2px; max-width: 100%;"></p>`
+      + `<p>再</p>`
+      + `<p data-tex="L = -\\log p" data-tex-display="" style="text-align: center;"><img src="data:image/png;base64,M11" alt="$$L = -\\log p$$" width="320" height="48" style="width: 320.4px; height: 48.2px; max-width: 100%;"></p>`
+      + `<p data-tex="y" data-tex-display="" style="text-align: center;"><img src="data:image/png;base64,M22" alt="$$y$$" width="320" height="48" style="width: 320.4px; height: 48.2px; max-width: 100%;"></p>`,
+    )
+    expect(result.wechatHtml).toBe(wechatHtml)
+  })
+
+  it(`leaves a formula as it is when there is no SVG to draw or drawing fails`, async () => {
+    const html = `${holder(`a`)}${holder(`b`)}`
+    const result = await withDisplayFormulaImages({ ...base, html, wechatHtml: block(`$$b$$`) }, async () => null)
+    expect(result.html).toBe(html)
+  })
+
+  it(`returns the same article when the HTML has no display formulas`, async () => {
+    const render = vi.fn()
+    const inlineOnly = { ...base, html: `<p><span data-tex="x">$x$</span></p>`, wechatHtml: block(`$$x$$`) }
+    expect(await withDisplayFormulaImages(inlineOnly, render)).toBe(inlineOnly)
     expect(render).not.toHaveBeenCalled()
   })
 })

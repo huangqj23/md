@@ -20,12 +20,15 @@
 //   service), but a pasted `latex` image makes the plugin skip its paste handling, and with it every
 //   upload. So formulas travel as plain-text tokens and become `latex` nodes after the paste.
 // - It has no tables; the extension page sends them as images already (`tablesAsImages`).
+// - It uploads data: images only, so images on an outside image host (md puts embedded images there
+//   before syncing) are read back into data: URLs before the paste.
 import type { AgentArticle, AgentResult, FillReport } from '../protocol'
 import type { PlatformFiller } from '../result'
 import { clickButtonWhenReady, countTextChars, dispatchPaste, pageMentions, queryFirst, setFieldValue, sleep, waitFor } from '../dom'
 import { FORMULA_DISPLAY_ATTR, FORMULA_TEX_ATTR } from '../protocol'
 import { done, editorMissing, fail } from '../result'
-import { dataUrlToBlob, toUploadableImage } from './wechat-images'
+import { ImageUploadError, readImage } from './platform-images'
+import { toUploadableImage } from './wechat-images'
 
 const TITLE_SELECTORS = [`.title textarea`, `textarea[placeholder*="标题"]`, `input[placeholder*="标题"]`]
 const EDITOR_CONTAINER_SELECTOR = `.editor-container`
@@ -229,21 +232,57 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   })
 }
 
-/**
- * Re-encodes embedded WebP as PNG before the paste. The editor's client accepts WebP, but nothing
- * shows Bilibili's upload endpoint does (WeChat's does not); PNG is safe on both counts.
- */
-async function withPngImages(html: string): Promise<string> {
-  if (!html.includes(`data:image/webp`))
-    return html
-  const body = new DOMParser().parseFromString(`<body>${html}</body>`, `text/html`).body
-  for (const image of Array.from(body.querySelectorAll(`img[src^="data:image/webp"]`))) {
-    const blob = dataUrlToBlob(image.getAttribute(`src`) ?? ``)
-    const png = blob && await toUploadableImage(blob)
-    if (png?.type === `image/png`)
-      image.setAttribute(`src`, await blobToDataUrl(png))
+const BILIBILI_IMAGE_HOST = /(?:^|\.)(?:hdslb\.com|biliimg\.com)$/i
+const WEB_ADDRESS = /^(?:https?:)?\/\//i
+
+function isBilibiliImage(src: string): boolean {
+  try {
+    return BILIBILI_IMAGE_HOST.test(new URL(src, location.href).hostname)
   }
-  return body.innerHTML
+  catch {
+    return false
+  }
+}
+
+interface PastableImages {
+  html: string
+  /** Linked images that could not be read and went in as links, which the plugin does not upload. */
+  unread: number
+  reasons: string[]
+}
+
+/**
+ * Gets every image ready for the image plugin: linked ones from an outside host are read into data:
+ * URLs, and WebP is re-encoded as PNG. The editor's client accepts WebP, but nothing shows
+ * Bilibili's upload endpoint does (WeChat's does not); PNG is safe on both counts.
+ */
+export async function withPastableImages(html: string): Promise<PastableImages> {
+  const body = new DOMParser().parseFromString(`<body>${html}</body>`, `text/html`).body
+  const converted = new Map<string, Promise<string | null>>()
+  const reasons = new Set<string>()
+  let unread = 0
+  for (const image of Array.from(body.querySelectorAll(`img[src]`))) {
+    const src = image.getAttribute(`src`)!
+    const linked = WEB_ADDRESS.test(src)
+    if (linked ? isBilibiliImage(src) : !src.startsWith(`data:image/webp`))
+      continue
+    if (!converted.has(src)) {
+      converted.set(src, readImage(src).then(toUploadableImage).then(
+        image => linked || image.type === `image/png` ? blobToDataUrl(image) : null,
+        (error: unknown) => {
+          if (linked && error instanceof ImageUploadError)
+            reasons.add(error.message)
+          return null
+        },
+      ))
+    }
+    const dataUrl = await converted.get(src)!
+    if (dataUrl)
+      image.setAttribute(`src`, dataUrl)
+    else if (linked)
+      unread++
+  }
+  return { html: body.innerHTML, unread, reasons: [...reasons] }
 }
 
 /** Clicks 保存为草稿, then waits for the footer tip to report a new successful save. */
@@ -276,7 +315,8 @@ async function fill(article: AgentArticle): Promise<AgentResult> {
 
   // Structure-only HTML: the editor keeps headings, lists, quotes, code, links and images.
   const tokenized = tokenizeFormulas(article.html || article.wechatHtml)
-  const html = await withPngImages(tokenized.html)
+  const pastable = await withPastableImages(tokenized.html)
+  const { html } = pastable
   const { formulas } = tokenized
   const bodyLength = () => countTextChars(editor.getText())
   editor.commands.focus(`end`)
@@ -299,6 +339,9 @@ async function fill(article: AgentArticle): Promise<AgentResult> {
     await waitFor(settled, { timeout: Math.max(0, deadline - Date.now()), interval: 500 })
   }
   const images = countImages(editor)
+  // Linked images that could not be read are in the editor as links nothing uploads.
+  images.failed += pastable.unread
+  images.reasons.push(...pastable.reasons.filter(reason => !images.reasons.includes(reason)))
   const placed = placeFormulas(editor, formulas)
 
   const report: FillReport = {

@@ -11,7 +11,7 @@ import { baijiahao } from './baijiahao'
 import { bilibili, hasBilibiliSession } from './bilibili'
 import { cnblogs } from './cnblogs'
 import { csdn } from './csdn'
-import { countJianshuLinks, fitLinks, jianshu } from './jianshu'
+import { countJianshuLinks, dropBlankText, fitBlocks, fitLinks, jianshu } from './jianshu'
 import { juejin } from './juejin'
 import { fillSummaryOf, toutiao, toutiaoFailure, unwrapOutsideLinks, uploadedImageUrl, watchToutiaoFailures } from './toutiao'
 import { pickWechatBodyEditor, readWechatToken, wechat, wechatEditorUrl } from './wechat'
@@ -1023,9 +1023,10 @@ describe(`jianshu`, () => {
       document.querySelector<HTMLInputElement>(`input`)!.value = article.title
       const area = document.querySelector<HTMLElement>(`.kalamu-area`)!
       const dante = { $editElem: [area], handleHtmlChange: vi.fn() }
+      const writer: Record<string, unknown> = { editor: dante, props: { userInfo } }
       if (userInfo)
-        (window as unknown as Record<symbol, unknown>)[Symbol(`jianshu_editor`)] = { editor: dante, props: { userInfo } }
-      return { area, dante }
+        (window as unknown as Record<symbol, unknown>)[Symbol(`jianshu_editor`)] = writer
+      return { area, dante, writer }
     }
 
     function jianshuFetch(overrides: Record<string, () => Response> = {}) {
@@ -1062,17 +1063,18 @@ describe(`jianshu`, () => {
       const html = area.innerHTML
       expect(html).toContain(`<h2>背景</h2>`)
       expect(html).toContain(`<p><img src="${hostedPng}" alt="架构图"></p>`)
-      expect(html).toContain(`［图片未能上传到简书：远程图］`)
-      expect(html).not.toContain(`example.com`)
-      expect(html).toContain(`<p><strong>模型 | 上下文</strong></p><p>8B | 128K</p>`)
+      // Neither Jianshu nor the page could copy it, so it keeps its link.
+      expect(html).toContain(`<p><img src="https://example.com/fig.png" alt="远程图"></p>`)
+      expect(html).toContain(`<p><strong>模型 | 上下文</strong><br>8B | 128K</p>`)
       expect(html).not.toContain(`data-tex`)
+      expect(html).toContain(`规模<span>3.8&nbsp;×&nbsp;10²⁵</span>`)
       expect(html).toContain(`<a href="https://arxiv.org/abs/2407.21783">论文</a>`)
       expect(html).toContain(`<a href="https://github.com/meta-llama/llama3">代码</a>`)
       expect(html).toContain(`和权重。`)
       expect(result.kind === `done` && result.report).toMatchObject({
         method: `dante`,
         draftSaved: true,
-        images: { total: 2, failed: 1, reasons: [`fetch: 图片无法访问`] },
+        images: { total: 2, failed: 1, reasons: [`fetch: 图片无法访问`, `读取不到图片（HTTP 404）：example.com`] },
         links: { limit: 2, unwrapped: 1, remaining: 2 },
       })
     })
@@ -1109,6 +1111,81 @@ describe(`jianshu`, () => {
       expect(result.kind === `done` && result.report).toMatchObject({ method: `paste`, fallback: `paste`, links: { unwrapped: 1 } })
     })
 
+    const drawnFormula = `<p data-tex="L = -\\log p" data-tex-display="" style="text-align: center;"><img src="${png}" alt="$$L = -\\log p$$" width="120" height="30"></p>`
+
+    it(`keeps a display formula the extension drew as a picture`, async () => {
+      jianshuFetch()
+      const { area } = jianshuWriter(new Map([[`member`, null]]))
+      const result = await runStep(jianshu, `fill`, { ...article, html: `<p>损失：</p>${drawnFormula}` })
+      expect(area.innerHTML).toBe(`<p>损失：</p><p style="text-align: center;"><img src="${hostedPng}" alt="$$L = -\\log p$$" width="120" height="30"></p>`)
+      expect(result.kind === `done` && result.report.images).toEqual({ total: 1, failed: 0 })
+    })
+
+    it(`writes a drawn formula as text when its picture does not reach Jianshu`, async () => {
+      jianshuFetch({ '/upload_images/token.json': () => new Response(`Too Many Requests`, { status: 429 }) })
+      const { area } = jianshuWriter(new Map([[`member`, null]]))
+      const result = await runStep(jianshu, `fill`, { ...article, html: `<p>损失：</p>${drawnFormula}` })
+      expect(area.innerHTML).toBe(`<p>损失：</p><p style="text-align: center;">L = −log p</p>`)
+      expect(result.kind === `done` && result.report.images).toMatchObject({ total: 1, failed: 1, reasons: [`token.json: HTTP 429`] })
+    })
+
+    it(`writes again when Jianshu replaces the editor after the first write`, async () => {
+      jianshuFetch()
+      const { dante, writer } = jianshuWriter(new Map([[`member`, null]]))
+      const replacement = document.createElement(`div`)
+      replacement.className = `kalamu-area`
+      replacement.contentEditable = `true`
+      const next = { $editElem: [replacement], handleHtmlChange: vi.fn() }
+      // The component remounts: a new Dante on a new element, the old element gone.
+      dante.handleHtmlChange.mockImplementation(() => {
+        document.querySelector(`.kalamu-area`)!.replaceWith(replacement)
+        writer.editor = next
+      })
+
+      const result = await runStep(jianshu, `fill`, richArticle)
+
+      expect(next.handleHtmlChange).toHaveBeenCalledWith(true)
+      expect(replacement.innerHTML).toContain(`<h2>背景</h2>`)
+      expect(result.kind === `done` && result.report).toMatchObject({ method: `dante-rewrite1`, draftSaved: true })
+    })
+
+    it(`reads the note back and saves through the component when the change event saved nothing`, async () => {
+      window.history.replaceState({}, ``, `/writer#/notebooks/7/notes/99`)
+      let stored = ``
+      jianshuFetch({ '/author/notes/99/content': () => new Response(JSON.stringify({ content: stored })) })
+      const { writer } = jianshuWriter(new Map([[`member`, null]]))
+      ;(writer.editor as Record<string, unknown>).clear = { getContent: () => `<p>cleaned</p>` }
+      writer.props = { ...(writer.props as object), match: { params: { noteId: `99` } } }
+      const saveNote = vi.fn(() => {
+        stored = `<p>cleaned</p>`
+      })
+      writer.saveNote = saveNote
+
+      const result = await runStep(jianshu, `fill`, richArticle)
+
+      expect(saveNote).toHaveBeenCalledWith(article.title, `<p>cleaned</p>`, true)
+      expect(result.kind === `done` && result.report).toMatchObject({ method: `dante+save`, draftSaved: true })
+      expect(result.kind === `done` && result.report.draftBlockedBy).toBeUndefined()
+    })
+
+    it(`fails as too long when Jianshu will not store a body over its 64 KiB`, async () => {
+      window.history.replaceState({}, ``, `/writer#/notebooks/7/notes/99`)
+      jianshuFetch({ '/author/notes/99/content': () => new Response(JSON.stringify({ content: `` })) })
+      jianshuWriter(new Map([[`member`, null]]))
+      const long = `<p>${`长`.repeat(30000)}</p>`
+      const result = await runStep(jianshu, `fill`, { ...article, html: long })
+      expect(result).toMatchObject({ kind: `error`, code: `too-long` })
+      expect(result.kind === `error` && result.message).toContain(`90007 bytes`)
+    })
+
+    it(`reports a draft that is still empty on Jianshu`, async () => {
+      window.history.replaceState({}, ``, `/writer#/notebooks/7/notes/99`)
+      jianshuFetch({ '/author/notes/99/content': () => new Response(JSON.stringify({ content: `` })) })
+      jianshuWriter(new Map([[`member`, null]]))
+      const result = await runStep(jianshu, `fill`, richArticle)
+      expect(result.kind === `done` && result.report).toMatchObject({ draftSaved: false, draftBlockedBy: `unsaved` })
+    })
+
     it(`keeps failed embedded images out of a Markdown note`, async () => {
       jianshuFetch({ '/upload_images/token.json': () => new Response(`Too Many Requests`, { status: 429 }) })
       document.body.innerHTML = `<input class="_24i7u"><textarea id="arthur-editor"></textarea>`
@@ -1117,6 +1194,32 @@ describe(`jianshu`, () => {
       expect(document.querySelector<HTMLTextAreaElement>(`#arthur-editor`)!.value).toBe(`前言\n\n［图片未能上传到简书］\n\n结尾`)
       expect(result.kind === `done` && result.report).toMatchObject({ images: { total: 1, failed: 1, reasons: [`token.json: HTTP 429`] } })
     })
+  })
+})
+
+describe(`jianshu blocks`, () => {
+  it(`turns each list into one paragraph of numbered or bulleted lines and h5/h6 into h4`, () => {
+    const body = document.createElement(`div`)
+    body.innerHTML = `<h5>小节</h5><ol start="3"><li>甲<ul><li>子项</li></ul></li><li><p>乙</p></li></ol><blockquote><ul><li>引用里的</li></ul></blockquote>`
+    fitBlocks(body)
+    expect(body.innerHTML).toBe(`<h4>小节</h4><p>3. 甲<br>${String.fromCharCode(0x3000).repeat(2)}• 子项<br>4. 乙 </p><blockquote><p>• 引用里的</p></blockquote>`)
+  })
+
+  it(`drops the line breaks between blocks, which Dante would turn into empty paragraphs`, () => {
+    const body = document.createElement(`div`)
+    body.innerHTML = `<h2>标题</h2>
+<p>一 <b>二</b> 三</p>
+<blockquote>
+<p>引用</p>
+</blockquote>
+<pre><code>a
+  b
+</code></pre>
+`
+    dropBlankText(body)
+    expect(body.innerHTML).toBe(`<h2>标题</h2><p>一 <b>二</b> 三</p><blockquote><p>引用</p></blockquote><pre><code>a
+  b
+</code></pre>`)
   })
 })
 

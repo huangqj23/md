@@ -28,7 +28,9 @@ export type CheckKey
     | `draftNotSaved`
     | `draftBlockedByImages`
     | `draftBlockedByLinks`
+    | `draftUnsaved`
     | `split`
+    | `splitBytes`
     | `error`
 
 export interface Check {
@@ -77,9 +79,11 @@ export function errorMessageKey(code?: RunErrorCode): string {
   }
 }
 
-export function recordChecks(platform: Pick<PublishPlatform, `autosave` | `titleMaxLength` | `bodyMaxLength`>, record: PlatformRecord): Check[] {
+export function recordChecks(platform: Pick<PublishPlatform, `autosave` | `titleMaxLength` | `bodyMaxLength` | `bodyMaxBytes`>, record: PlatformRecord): Check[] {
   const split: Check[] = record.parts && record.parts.length > 1
-    ? [{ level: `ok`, key: `split`, params: { count: record.parts.length, limit: platform.bodyMaxLength ?? 0 } }]
+    ? [platform.bodyMaxBytes
+        ? { level: `ok`, key: `splitBytes`, params: { count: record.parts.length, limit: Math.round(platform.bodyMaxBytes / 1000) } }
+        : { level: `ok`, key: `split`, params: { count: record.parts.length, limit: platform.bodyMaxLength ?? 0 } }]
     : []
   if (record.status === `failed` || record.status === `login-required`)
     return [...split, { level: `bad`, key: `error`, params: { code: record.errorCode ?? `` } }]
@@ -138,6 +142,8 @@ export function recordChecks(platform: Pick<PublishPlatform, `autosave` | `title
     checks.push({ level: `warn`, key: `draftBlockedByImages` })
   else if (report.draftBlockedBy === `links`)
     checks.push({ level: `warn`, key: `draftBlockedByLinks`, params: { count: report.links?.remaining ?? 0, limit: report.links?.limit ?? 0 } })
+  else if (report.draftBlockedBy === `unsaved`)
+    checks.push({ level: `warn`, key: `draftUnsaved` })
   else if (platform.autosave)
     checks.push({ level: `ok`, key: `autosave` })
   else

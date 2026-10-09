@@ -45,6 +45,8 @@ export default {
     images: {
       title: `{count} 张图片在其他平台可能无法显示`,
       description: `公众号会自动上传内嵌（base64）图片；其他平台不接收内嵌或本地路径的图片，建议先通过图床上传，改成公网链接。`,
+      hostedTitle: `{count} 张内嵌图片会先上传到图床（{host}）`,
+      hostedDescription: `同步前统一上传，各平台拿到的都是图片链接，传过的图不会重复上传。图床要允许跨域读取（CORS）：公众号、头条、百家号、B站会从链接把图转存到自己的图床。`,
     },
     start: `同步到草稿`,
     stop: `停止`,
@@ -92,6 +94,12 @@ export default {
       progress: `已发布 {published} / {total}`,
       progressDetail: `待发布 {pending} · 失败 {failed}`,
       progressSyncing: `同步中 {count}`,
+      hosting: {
+        uploading: `正在把图片上传到图床（{host}）`,
+        count: `{done} / {total}`,
+        done: `{total} 张图片已在图床（{host}），各平台拿到的是图片链接`,
+        failed: `{failed}/{total} 张图片没传到图床（{host}），这几张按内嵌图同步：{reasons}`,
+      },
       outdated: {
         intro: `文章在上次同步后改过。`,
         drafts: `{names} 的草稿是旧版本。`,
@@ -145,6 +153,7 @@ export default {
         draftNotSaved: `需手动保存`,
         draftBlockedByImages: `草稿没存上`,
         draftBlockedByLinks: `链接太多存不了`,
+        draftUnsaved: `草稿是空的`,
       },
       detailLabel: `{name} 详情`,
       sentence: {
@@ -198,7 +207,9 @@ export default {
         draftNotSaved: `请在该平台手动保存草稿`,
         draftBlockedByImages: `有图片没传上去，平台存不了草稿：在编辑器里点这些图片上的“重新上传”，传好后再保存草稿`,
         draftBlockedByLinks: `正文里还有 {count} 个网址，超过这个账号每篇 {limit} 个链接的上限（简书非会员的限制），平台存不了草稿：在编辑器里删掉多余的网址后它会自动保存`,
+        draftUnsaved: `平台的草稿里还没有正文（同步后从平台读回来是空的）：在编辑器里随便改一个字让它自动保存；还不行就重新同步`,
         split: `超过平台 {limit} 字的上限，拆成了 {count} 篇，发布时按顺序发`,
+        splitBytes: `正文超过平台单篇约 {limit} KB 的存储上限，按小节拆成了 {count} 篇，发布时按顺序发`,
       },
       mark: {
         label: `在平台上点了发布？回来标记一下`,

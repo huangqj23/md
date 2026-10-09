@@ -11,10 +11,18 @@ export interface WechatSession {
 
 export type ImageUploader = (image: Blob) => Promise<string | null>
 
-export interface EmbeddedImageUpload {
-  html: string
-  total: number
-  failed: number
+const WECHAT_IMAGE_HOST = /(?:^|\.)(?:qpic\.cn|qlogo\.cn)$/i
+
+/** Whether the image is on WeChat's CDN already (the image library answers with mmbiz.qpic.cn addresses). */
+export function isWechatImage(src: string): boolean {
+  if (!/^(?:https?:)?\/\//i.test(src))
+    return false
+  try {
+    return WECHAT_IMAGE_HOST.test(new URL(src, `https://mp.weixin.qq.com/`).hostname)
+  }
+  catch {
+    return false
+  }
 }
 
 /** Decode a `data:` URL without fetch (the page CSP may not allow data: fetches). */
@@ -96,31 +104,4 @@ export function createWechatUploader(session: WechatSession): ImageUploader {
       return null
     }
   }
-}
-
-/**
- * Replace every embedded (`data:`) image with an uploaded copy. The HTML is
- * edited as an inert template so formula SVGs and inline styles survive;
- * images that fail to upload keep their data URL and are counted.
- */
-export async function uploadEmbeddedImages(html: string, upload: ImageUploader): Promise<EmbeddedImageUpload> {
-  const template = document.createElement(`template`)
-  template.innerHTML = html
-  const images = Array.from(template.content.querySelectorAll<HTMLImageElement>(`img[src^="data:"]`))
-  if (images.length === 0)
-    return { html, total: 0, failed: 0 }
-
-  const uploaded = new Map<string, string | null>()
-  for (const img of images) {
-    const source = img.getAttribute(`src`)!
-    if (!uploaded.has(source)) {
-      const blob = dataUrlToBlob(source)
-      uploaded.set(source, blob ? await upload(await toUploadableImage(blob)) : null)
-    }
-    const url = uploaded.get(source)
-    if (url)
-      img.setAttribute(`src`, url)
-  }
-  const failed = images.filter(img => img.getAttribute(`src`)!.startsWith(`data:`)).length
-  return { html: template.innerHTML, total: images.length, failed }
 }

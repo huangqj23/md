@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createWechatUploader, dataUrlToBlob, toUploadableImage, uploadEmbeddedImages } from './wechat-images'
+import { uploadHtmlImages } from './platform-images'
+import { createWechatUploader, dataUrlToBlob, isWechatImage, toUploadableImage } from './wechat-images'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -37,28 +38,46 @@ describe(`toUploadableImage`, () => {
   })
 })
 
-describe(`uploadEmbeddedImages`, () => {
-  it(`uploads each distinct data URL once and leaves remote images and SVG alone`, async () => {
+describe(`isWechatImage`, () => {
+  it(`recognises WeChat's CDN only`, () => {
+    expect(isWechatImage(`https://mmbiz.qpic.cn/mmbiz_png/abc/0?wx_fmt=png`)).toBe(true)
+    expect(isWechatImage(`//mmbiz.qlogo.cn/x/0`)).toBe(true)
+    expect(isWechatImage(`https://obisidian-1302473945.cos.ap-chengdu.myqcloud.com/md/a.png`)).toBe(false)
+    expect(isWechatImage(`https://evilqpic.cn/a.png`)).toBe(false)
+    expect(isWechatImage(`data:image/png;base64,AAAA`)).toBe(false)
+    expect(isWechatImage(`images/a.png`)).toBe(false)
+  })
+})
+
+describe(`uploading a WeChat article's images`, () => {
+  it(`moves embedded and image-host images into the library once each, leaving WeChat's own and SVG alone`, async () => {
     const upload = vi.fn(async () => `https://mmbiz.qpic.cn/x/0?wx_fmt=png`)
+    const fetchMock = vi.fn(async () => ({ ok: true, blob: async () => new Blob([`png`], { type: `image/png` }) }))
+    vi.stubGlobal(`fetch`, fetchMock)
     const png = `data:image/png;base64,${btoa(`png`)}`
+    const hosted = `https://obisidian-1302473945.cos.ap-chengdu.myqcloud.com/md/a.png`
     const html = `<p><span class="katex-inline" data-math-raw="$x$"><svg viewBox="0 0 1 1"><path d="M0 0"></path></svg></span></p>`
-      + `<img src="${png}"><img src="${png}"><img src="https://cdn.example.com/a.png">`
+      + `<img src="${png}"><img src="${png}"><img src="${hosted}"><img src="https://mmbiz.qpic.cn/old/0">`
 
-    const result = await uploadEmbeddedImages(html, upload)
+    const result = await uploadHtmlImages(html, upload, { isHosted: isWechatImage })
 
-    expect(upload).toHaveBeenCalledOnce()
-    expect(result.total).toBe(2)
-    expect(result.failed).toBe(0)
-    expect(result.html).toContain(`<svg viewBox="0 0 1 1"><path d="M0 0"></path></svg>`)
-    expect(result.html).toContain(`src="https://cdn.example.com/a.png"`)
-    expect(result.html.match(/mmbiz\.qpic\.cn/g)).toHaveLength(2)
+    expect(upload).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledWith(hosted, { credentials: `omit` })
+    expect(result).toMatchObject({ total: 3, failed: 0 })
+    expect(result.text).toContain(`<svg viewBox="0 0 1 1"><path d="M0 0"></path></svg>`)
+    expect(result.text).not.toContain(`myqcloud.com`)
+    expect(result.text).toContain(`src="https://mmbiz.qpic.cn/old/0"`)
   })
 
-  it(`returns the HTML untouched when there is nothing embedded`, async () => {
-    const upload = vi.fn()
-    const html = `<p>plain</p>`
-    expect(await uploadEmbeddedImages(html, upload)).toEqual({ html, total: 0, failed: 0 })
-    expect(upload).not.toHaveBeenCalled()
+  it(`keeps an image the page cannot read and says why`, async () => {
+    vi.stubGlobal(`fetch`, vi.fn(async () => {
+      throw new TypeError(`Failed to fetch`)
+    }))
+    const html = `<img src="https://obisidian-1302473945.cos.ap-chengdu.myqcloud.com/md/a.png">`
+
+    const result = await uploadHtmlImages(html, vi.fn(), { isHosted: isWechatImage })
+
+    expect(result).toEqual({ text: html, total: 1, failed: 1, reasons: [`读取不到图片（图床可能没有允许跨域读取）：obisidian-1302473945.cos.ap-chengdu.myqcloud.com`] })
   })
 })
 

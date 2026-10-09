@@ -45,6 +45,8 @@ export default {
     images: {
       title: `{count} 枚の画像は他のプラットフォームで表示されない可能性があります`,
       description: `WeChat では埋め込み（base64）画像を自動でアップロードします。他のプラットフォームは埋め込み画像やローカルパスを受け付けないため、先に画像ホストへアップロードして公開 URL にしてください。`,
+      hostedTitle: `埋め込み画像 {count} 枚を先に画像ホスト（{host}）へアップロードします`,
+      hostedDescription: `同期の前にまとめてアップロードし、各プラットフォームには画像 URL を渡します。アップロード済みの画像は再利用します。画像ホストはクロスオリジン読み取り（CORS）を許可してください：WeChat・Toutiao・Baijiahao・Bilibili は URL から画像を自分のホストへ取り込みます。`,
     },
     start: `下書きとして同期`,
     stop: `停止`,
@@ -92,6 +94,12 @@ export default {
       progress: `公開済み {published} / {total}`,
       progressDetail: `公開待ち {pending} · 失敗 {failed}`,
       progressSyncing: `同期中 {count}`,
+      hosting: {
+        uploading: `画像を画像ホスト（{host}）へアップロードしています`,
+        count: `{done} / {total}`,
+        done: `画像 {total} 枚が画像ホスト（{host}）にあります。各プラットフォームには画像 URL を渡します`,
+        failed: `画像 {failed}/{total} 枚は画像ホスト（{host}）にアップロードできず、埋め込みのまま同期します：{reasons}`,
+      },
       outdated: {
         intro: `前回の同期後に記事が変更されました。`,
         drafts: `{names} の下書きは古いバージョンです。`,
@@ -145,6 +153,7 @@ export default {
         draftNotSaved: `手動保存が必要`,
         draftBlockedByImages: `下書き未保存`,
         draftBlockedByLinks: `リンク過多で未保存`,
+        draftUnsaved: `下書きが空`,
       },
       detailLabel: `{name} の詳細`,
       sentence: {
@@ -198,7 +207,9 @@ export default {
         draftNotSaved: `そのプラットフォームで下書きを手動で保存してください`,
         draftBlockedByImages: `アップロードできていない画像があるため、下書きを保存できません。エディターで失敗した画像の「重新上传」（再アップロード）を押し、終わってから下書きを保存してください`,
         draftBlockedByLinks: `本文にまだ URL が {count} 個あり、このアカウントの 1 記事あたり {limit} 個の上限（簡書の非会員の制限）を超えているため、下書きを保存できません。エディターで余分な URL を削除すると自動で保存されます`,
+        draftUnsaved: `プラットフォームの下書きにまだ本文がありません（同期後に読み戻すと空でした）。エディターで 1 文字でも変更すると自動保存されます。だめなら再同期してください`,
         split: `プラットフォームの上限 {limit} 文字を超えるため {count} 本に分けました。順番に公開してください`,
+        splitBytes: `本文がプラットフォームの 1 記事あたり約 {limit} KB の保存上限を超えるため、見出しで {count} 本に分けました。順番に公開してください`,
       },
       mark: {
         label: `プラットフォームで公開しましたか？ここでマークしてください`,

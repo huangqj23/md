@@ -191,6 +191,8 @@ async function uploadSources(
       const url = await beforeDeadline(read(source).then(toUploadableImage).then(upload), deadline)
       if (url)
         uploaded.set(source, url)
+      else if (Date.now() >= deadline)
+        reasons.set(source, `上传超时`)
     }
     catch (error) {
       if (error instanceof ImageUploadError && error.message)

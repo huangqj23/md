@@ -1,3 +1,5 @@
+import type { FormulaDrawing } from './formulas'
+import type { TableDrawing } from './tables'
 import type { PublishPlatformId } from '@/publish-agent/protocol'
 
 /** How a platform receives the article (shown to the user). */
@@ -37,6 +39,11 @@ export interface PublishPlatform {
   titleMaxLength?: number
   /** Longest body the platform takes, counted like `AgentArticle.textLength`; longer articles go in several parts. */
   bodyMaxLength?: number
+  /**
+   * Most UTF-8 bytes of body HTML the platform stores (estimated by `htmlBytes`); longer articles
+   * go in several parts.
+   */
+  bodyMaxBytes?: number
   /** The editor has no tables, so each one goes in as an image of itself. */
   tablesAsImages?: boolean
   /**
@@ -44,6 +51,13 @@ export interface PublishPlatform {
    * display formulas go in as images of themselves, inline ones as plain text.
    */
   plainFormulas?: boolean
+  /**
+   * The editor takes `AgentArticle.html` and has no formulas of its own: display formulas go in as
+   * images of themselves (`withDisplayFormulaImages`); the agent writes inline ones as text.
+   */
+  displayFormulasAsImages?: boolean
+  /** How tables and formulas drawn as images for this platform are drawn, when not the default way. */
+  pictures?: { table?: TableDrawing, formula?: FormulaDrawing }
   /** Longer than the runner's default for editors that upload every image while the agent waits. */
   stepTimeout?: number
   /** Saves the draft on its own once content is in the editor. */
@@ -79,6 +93,8 @@ export const PUBLISH_PLATFORMS: readonly PublishPlatform[] = [
     loginUrlPattern: /mp\.weixin\.qq\.com\/cgi-bin\/(?:loginpage|bizlogin)/,
     format: `wechat-html`,
     titleMaxLength: 64,
+    // Images not on WeChat's CDN (embedded, or on md's image host) go into the image library before the body goes in.
+    stepTimeout: 300000,
     autosave: false,
     async detectLogin(ctx) {
       const { url, text } = await ctx.fetchText(this.loginCheckUrl)
@@ -213,7 +229,21 @@ export const PUBLISH_PLATFORMS: readonly PublishPlatform[] = [
     loginCheckUrl: `https://www.jianshu.com/settings/basic.json`,
     loginUrlPattern: /jianshu\.com\/sign_in/,
     format: `markdown`,
-    // Embedded images are uploaded one by one before the body goes in.
+    // A note's HTML goes in a 64 KiB text column (published notes stop just under 65,535 bytes);
+    // Jianshu refuses a longer body with "文章内容过长保存失败". The estimate leaves room for the
+    // markup the editor adds on saving.
+    bodyMaxBytes: 56000,
+    // The rich-text editor has neither tables nor formulas (its own formula images count as links),
+    // so tables and display formulas go in as images of themselves. Jianshu shows an image at its
+    // own pixel size (capped at its 730px article column) over a grey box, so these are drawn on
+    // white at one image pixel per CSS pixel, tables no wider than the column's text.
+    tablesAsImages: true,
+    displayFormulasAsImages: true,
+    pictures: {
+      table: { width: 680, pixelRatio: 1 },
+      formula: { pixelRatio: 1, fontSize: `18px`, background: `#ffffff`, padding: 6 },
+    },
+    // Embedded images (tables and formulas included) are uploaded one by one before the body goes in.
     stepTimeout: 300000,
     autosave: true,
     async detectLogin(ctx) {

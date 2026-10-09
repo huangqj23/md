@@ -147,8 +147,10 @@ export function chooseCuts(lengths: readonly number[], levels: readonly number[]
 }
 
 export interface SplitOptions {
-  /** Longest body a part may have, in the unit of `AgentArticle.textLength`. */
+  /** Longest body a part may have, in the unit of `measure`. */
   limit: number
+  /** Measures a piece of Markdown against `limit`; counts like `AgentArticle.textLength` when unset. */
+  measure?: (markdown: string) => Promise<number>
   titleMaxLength?: number
   /** Gives up beyond this many parts. */
   maxParts?: number
@@ -171,6 +173,19 @@ const defaultDeps: SplitDeps = {
   build: input => buildAgentArticle({ ...input, wechatHtml: `` }),
 }
 
+/**
+ * What an image adds to stored HTML once on the platform's image host: its address and the box the
+ * editor wraps it in (Jianshu's `image-package`), rather than an embedded image's data.
+ */
+const HOSTED_IMAGE_BYTES = 300
+
+/** UTF-8 bytes of a piece of Markdown's HTML as an editor stores it, each image counted as hosted. */
+export async function htmlBytes(markdown: string): Promise<number> {
+  const { html } = toPlatformHtml(await generatePureHTML(markdown), ``)
+  const images = html.match(/<img\b[^>]*>/gi) ?? []
+  return new TextEncoder().encode(html.replace(/<img\b[^>]*>/gi, ``)).length + images.length * HOSTED_IMAGE_BYTES
+}
+
 /** Room for the "continued" lines and part titles inside each part. */
 const PART_NOTE_ALLOWANCE = 200
 
@@ -189,12 +204,13 @@ export async function splitArticle(
   if (sections.length < 2)
     return null
 
+  const measure = options.measure ?? deps.measure
   const lengths: number[] = []
   for (const section of sections)
-    lengths.push(await deps.measure(section.markdown))
+    lengths.push(await measure(section.markdown))
   const levels = sections.map(section => section.level)
   const headingLevels = [...new Set(levels.filter(level => level > 0))].sort((a, b) => a - b)
-  const definitionsLength = definitions.length ? await deps.measure(definitions.map(item => item.line).join(`\n\n`)) : 0
+  const definitionsLength = definitions.length ? await measure(definitions.map(item => item.line).join(`\n\n`)) : 0
   const cap = options.limit - PART_NOTE_ALLOWANCE - definitionsLength
   const total = lengths.reduce((sum, length) => sum + length, 0)
   if (cap <= 0)
@@ -236,7 +252,10 @@ export async function splitArticle(
       if (!starts)
         continue
       const built = await build(starts)
-      if (built.every(part => part.textLength <= options.limit))
+      const sizes = options.measure
+        ? await Promise.all(built.map(part => options.measure!(part.markdown)))
+        : built.map(part => part.textLength)
+      if (sizes.every(size => size <= options.limit))
         return built
     }
   }

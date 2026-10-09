@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { PublishPlatformId } from '@/publish-agent/protocol'
 import type { CenterFilter, PlatformState, PlatformView } from '@/services/publish/center'
-import { TriangleAlert } from '@lucide/vue'
+import { ImageUp, Loader2, TriangleAlert } from '@lucide/vue'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
@@ -28,7 +28,7 @@ const { t, locale } = useI18n()
 const publishStore = usePublishStore()
 const postStore = usePostStore()
 const uiStore = useUIStore()
-const { records, running, cancelRequested } = storeToRefs(publishStore)
+const { records, running, cancelRequested, imageHosting } = storeToRefs(publishStore)
 const { posts, currentPostId } = storeToRefs(postStore)
 
 const dialogOpen = computed({
@@ -89,6 +89,18 @@ function platformName(id: PublishPlatformId): string {
 }
 
 const articleTitle = computed(() => record.value?.title || viewedPost.value?.title || ``)
+
+/** The latest sync's uploads to the image host, when they belong to the article shown. */
+const hosting = computed(() => {
+  const state = imageHosting.value
+  if (!state || state.postId !== viewedPost.value?.id)
+    return null
+  return {
+    ...state,
+    name: t(`upload.hosts.${state.host}`),
+    percent: state.total ? Math.round(state.done / state.total * 100) : 0,
+  }
+})
 
 const versionLine = computed(() => {
   if (!record.value)
@@ -254,6 +266,33 @@ function openInEditor() {
               </div>
             </div>
           </section>
+
+          <div
+            v-if="hosting"
+            role="status"
+            class="flex flex-col gap-2 rounded-lg border px-4 py-3 text-sm"
+            :class="hosting.finished && hosting.failed ? 'border-orange-200 bg-orange-50 text-orange-950 dark:border-orange-900 dark:bg-orange-950/40 dark:text-orange-100' : 'bg-background'"
+          >
+            <template v-if="!hosting.finished">
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <Loader2 class="size-4 shrink-0 animate-spin" aria-hidden="true" />
+                <span class="min-w-0 flex-1">{{ t('publish.center.hosting.uploading', { host: hosting.name }) }}</span>
+                <span class="tabular-nums text-muted-foreground">{{ t('publish.center.hosting.count', { done: hosting.done, total: hosting.total }) }}</span>
+              </div>
+              <div class="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                <div class="h-full rounded-full bg-primary transition-[width] duration-300" :style="{ width: `${hosting.percent}%` }" />
+              </div>
+            </template>
+            <p v-else class="flex items-start gap-3">
+              <TriangleAlert v-if="hosting.failed" class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+              <ImageUp v-else class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span class="min-w-0">
+                {{ hosting.failed
+                  ? t('publish.center.hosting.failed', { failed: hosting.failed, total: hosting.total, host: hosting.name, reasons: hosting.reasons.join('；') })
+                  : t('publish.center.hosting.done', { total: hosting.total, host: hosting.name }) }}
+              </span>
+            </p>
+          </div>
 
           <Alert v-if="!isCurrentPost">
             <AlertDescription class="flex flex-wrap items-center justify-between gap-2">

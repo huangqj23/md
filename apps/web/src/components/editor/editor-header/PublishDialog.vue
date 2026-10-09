@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { PublishPlatformId } from '@/publish-agent/protocol'
 import type { ContentFormat } from '@/services/publish/platforms'
-import { ImageOff, Loader2, RefreshCw, ShieldCheck } from '@lucide/vue'
+import type { UploadProviderId } from '@/services/upload/provider-registry'
+import { ImageOff, ImageUp, Loader2, RefreshCw, ShieldCheck } from '@lucide/vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -36,7 +37,11 @@ const dialogOpen = computed({
 const title = ref(``)
 const summary = ref(``)
 const permissionGranted = ref<boolean | null>(null)
-const unsupportedImages = ref(0)
+const embeddedImages = ref(0)
+const localImages = ref(0)
+/** Embedded images go to this image host before syncing; null keeps them embedded. */
+const imageHost = ref<UploadProviderId | null>(null)
+const unsupportedImages = computed(() => localImages.value + (imageHost.value ? 0 : embeddedImages.value))
 
 const FORMAT_KEY: Record<ContentFormat, string> = {
   'markdown': `markdown`,
@@ -50,11 +55,13 @@ function prefill() {
   summary.value = defaults.summary
   const output = document.querySelector(`#output`)
   const audit = output ? auditImages(output) : null
-  unsupportedImages.value = audit ? audit.embedded + audit.local : 0
+  embeddedImages.value = audit?.embedded ?? 0
+  localImages.value = audit?.local ?? 0
 }
 
 onMounted(async () => {
   prefill()
+  imageHost.value = await publishStore.imageHost()
   permissionGranted.value = await publishStore.hasPermissions()
   if (permissionGranted.value && Object.keys(loginStates.value).length === 0)
     void publishStore.refreshLoginStates()
@@ -140,6 +147,12 @@ async function start() {
               {{ t('publish.permission.grant') }}
             </Button>
           </AlertDescription>
+        </Alert>
+
+        <Alert v-if="imageHost && embeddedImages > 0">
+          <ImageUp class="h-4 w-4" />
+          <AlertTitle>{{ t('publish.images.hostedTitle', { count: embeddedImages, host: t(`upload.hosts.${imageHost}`) }) }}</AlertTitle>
+          <AlertDescription>{{ t('publish.images.hostedDescription') }}</AlertDescription>
         </Alert>
 
         <Alert v-if="unsupportedImages > 0">

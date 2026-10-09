@@ -26,7 +26,8 @@ export const AGENT_PROTOCOL_VERSION = 1
 
 /**
  * In `AgentArticle.html` every formula is an element around its readable `$…$` source that carries
- * the bare TeX in this attribute, so editors with their own formula nodes can rebuild it.
+ * the bare TeX in this attribute, so editors with their own formula nodes can rebuild it. For a
+ * platform with `displayFormulasAsImages`, a display formula's element holds a picture of it instead.
  */
 export const FORMULA_TEX_ATTR = `data-tex`
 /** Marks a display formula, which is a paragraph of its own. */
@@ -65,9 +66,10 @@ export interface FillReport {
   draftSaved: boolean
   /**
    * Why the draft was not saved, when the platform would have refused it: `images`, some never
-   * uploaded; `links`, more links than the account may have (see `links`).
+   * uploaded; `links`, more links than the account may have (see `links`); `unsaved`, the agent read
+   * the draft back from the platform and its body was still empty.
    */
-  draftBlockedBy?: `images` | `links`
+  draftBlockedBy?: `images` | `links` | `unsaved`
   /**
    * The platform caps links per article for this account (Jianshu: 2 for non-members). `unwrapped`
    * links went in as plain text to stay under `limit`; `remaining` is what the platform still counts.

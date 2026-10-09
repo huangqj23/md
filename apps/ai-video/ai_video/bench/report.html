@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Phase 0 模型对比</title>
+    <style>
+      :root {
+        --bg: #f6f5f2;
+        --panel: #ffffff;
+        --ink: #1d1d1f;
+        --muted: #6b6b70;
+        --line: #e3e1dc;
+        --accent: #b4532a;
+        --ok: #2f7d4f;
+        --bad: #b3261e;
+        --warn: #9a6700;
+        --chip: #efede8;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']) {
+          --bg: #141414;
+          --panel: #1e1e1f;
+          --ink: #ececec;
+          --muted: #9b9ba0;
+          --line: #303033;
+          --accent: #e08a5f;
+          --ok: #6cc28f;
+          --bad: #f2867e;
+          --warn: #e2b54a;
+          --chip: #2a2a2c;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font: 14px/1.6 -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: var(--bg);
+        border-bottom: 1px solid var(--line);
+        padding: 12px 16px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 16px;
+        align-items: center;
+      }
+      header h1 {
+        font-size: 16px;
+        margin: 0;
+      }
+      header .meta {
+        color: var(--muted);
+      }
+      header .spacer {
+        flex: 1;
+      }
+      button {
+        font: inherit;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--ink);
+        border-radius: 6px;
+        padding: 4px 12px;
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      nav {
+        padding: 8px 16px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      nav a {
+        color: var(--muted);
+        text-decoration: none;
+        background: var(--chip);
+        border-radius: 999px;
+        padding: 2px 10px;
+        font-size: 13px;
+      }
+      main {
+        padding: 0 16px 48px;
+        max-width: 1600px;
+        margin: 0 auto;
+      }
+      section.case {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        margin: 16px 0;
+        padding: 16px;
+      }
+      section.case h2 {
+        font-size: 16px;
+        margin: 0 0 4px;
+      }
+      .sub {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .check {
+        margin: 8px 0;
+        padding: 6px 10px;
+        border-left: 3px solid var(--accent);
+        background: var(--chip);
+        font-size: 13px;
+      }
+      details {
+        margin: 6px 0;
+      }
+      details summary {
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      pre.prompt {
+        white-space: pre-wrap;
+        font: 13px/1.6 inherit;
+        background: var(--chip);
+        padding: 8px 10px;
+        border-radius: 6px;
+        margin: 4px 0;
+      }
+      h3 {
+        font-size: 13px;
+        color: var(--muted);
+        font-weight: 600;
+        margin: 14px 0 6px;
+      }
+      .grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(auto-fill, minmax(var(--min, 300px), 1fr));
+      }
+      .grid.portrait {
+        --min: 210px;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        background: var(--panel);
+      }
+      .card video,
+      .card img {
+        width: 100%;
+        display: block;
+        background: #000;
+      }
+      .card audio {
+        width: 100%;
+      }
+      .card .body {
+        padding: 8px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+      .name {
+        font-weight: 600;
+      }
+      .tag {
+        font-size: 12px;
+        background: var(--chip);
+        color: var(--muted);
+        border-radius: 4px;
+        padding: 0 6px;
+      }
+      .badge {
+        font-size: 12px;
+        border-radius: 4px;
+        padding: 0 6px;
+        color: #fff;
+      }
+      .badge.rejected {
+        background: var(--bad);
+      }
+      .badge.failed,
+      .badge.error {
+        background: var(--warn);
+      }
+      .badge.pending,
+      .badge.skipped {
+        background: var(--muted);
+      }
+      .msg {
+        font-size: 12px;
+        color: var(--muted);
+        word-break: break-all;
+      }
+      .empty {
+        padding: 24px 10px;
+        text-align: center;
+        color: var(--muted);
+        background: var(--chip);
+      }
+      .scores select {
+        font: inherit;
+        font-size: 12px;
+        padding: 1px 2px;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: var(--panel);
+        color: var(--ink);
+      }
+      .scores label {
+        font-size: 12px;
+        color: var(--muted);
+        display: inline-flex;
+        gap: 3px;
+        align-items: center;
+      }
+      .scores input[type='text'] {
+        flex: 1;
+        min-width: 0;
+        font: inherit;
+        font-size: 12px;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 1px 6px;
+        background: var(--panel);
+        color: var(--ink);
+      }
+      .llm-text {
+        white-space: pre-wrap;
+        font-size: 13px;
+        max-height: 420px;
+        overflow: auto;
+        background: var(--chip);
+        padding: 8px;
+        border-radius: 6px;
+      }
+      @media (max-width: 600px) {
+        .grid,
+        .grid.portrait {
+          --min: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1 id="title">Phase 0 模型对比</h1>
+      <span class="meta" id="meta"></span>
+      <span class="spacer"></span>
+      <button id="reveal">显示模型名</button>
+      <button id="export" class="primary">导出评分</button>
+    </header>
+    <nav id="nav"></nav>
+    <main id="main"></main>
+    <script id="data" type="application/json">
+      __DATA__
+    </script>
+    <script>
+      ;(function () {
+        const data = JSON.parse(document.getElementById('data').textContent)
+        const storeKey = 'ai-video-bench:' + data.run
+        const DIMS = {
+          video: [
+            ['quality', '画面'],
+            ['motion', '运动'],
+            ['adherence', '遵循'],
+          ],
+          image: [
+            ['quality', '画面'],
+            ['adherence', '遵循'],
+          ],
+          tts: [
+            ['natural', '自然'],
+            ['prosody', '韵律'],
+          ],
+          llm: [
+            ['writing', '文采'],
+            ['accuracy', '准确'],
+          ],
+        }
+        const MODES = { i2v: '图生视频', t2v: '文生视频', chain: '长镜头' }
+        const STATES = { rejected: '被拒绝', failed: '失败', error: '出错', pending: '等待中', skipped: '跳过' }
+        let scores = {}
+        try {
+          scores = JSON.parse(localStorage.getItem(storeKey) || '{}')
+        } catch (e) {
+          scores = {}
+        }
+        let revealed = false
+        const nameNodes = []
+
+        function save() {
+          try {
+            localStorage.setItem(storeKey, JSON.stringify(scores))
+          } catch (e) {}
+        }
+        function el(tag, attrs, ...children) {
+          const node = document.createElement(tag)
+          for (const [k, v] of Object.entries(attrs || {})) {
+            if (k === 'class') node.className = v
+            else if (k === 'text') node.textContent = v
+            else node.setAttribute(k, v)
+          }
+          for (const c of children) if (c) node.append(c)
+          return node
+        }
+        // Stable shuffle per group so the blind order survives reloads but differs between cases.
+        function hash(s) {
+          let h = 2166136261
+          for (const ch of s) {
+            h ^= ch.codePointAt(0)
+            h = Math.imul(h, 16777619)
+          }
+          return h >>> 0
+        }
+        function blindOrder(group, items) {
+          return items
+            .map((it) => [hash(group + '|' + it.provider + '|' + (it.voice || '')), it])
+            .sort((a, b) => a[0] - b[0])
+            .map((x) => x[1])
+        }
+        function nameNode(blind, real) {
+          const node = el('span', { class: 'name', text: blind })
+          node.dataset.blind = blind
+          node.dataset.real = real
+          nameNodes.push(node)
+          return node
+        }
+        function scoreRow(kind, key) {
+          const s = scores[key] || {}
+          const row = el('div', { class: 'row scores' })
+          for (const [dim, label] of DIMS[kind]) {
+            const sel = el('select', { 'aria-label': label })
+            sel.append(el('option', { value: '', text: label }))
+            for (let i = 5; i >= 1; i--) sel.append(el('option', { value: String(i), text: label + ' ' + i }))
+            sel.value = s[dim] ? String(s[dim]) : ''
+            sel.addEventListener('change', () => {
+              ;(scores[key] ||= {})[dim] = sel.value ? Number(sel.value) : null
+              save()
+            })
+            row.append(sel)
+          }
+          const usable = el('input', { type: 'checkbox' })
+          usable.checked = !!s.usable
+          usable.addEventListener('change', () => {
+            ;(scores[key] ||= {}).usable = usable.checked
+            save()
+          })
+          row.append(el('label', {}, usable, '能用'))
+          const note = el('input', { type: 'text', placeholder: '备注（如：牌匾乱码、手部崩坏）' })
+          note.value = s.note || ''
+          note.addEventListener('change', () => {
+            ;(scores[key] ||= {}).note = note.value
+            save()
+          })
+          row.append(note)
+          return row
+        }
+        function statusRow(item) {
+          const row = el('div', { class: 'row' })
+          if (item.state && item.state !== 'done')
+            row.append(el('span', { class: 'badge ' + item.state, text: STATES[item.state] || item.state }))
+          const bits = []
+          if (item.latency_s) bits.push('耗时 ' + Math.round(item.latency_s) + ' 秒')
+          if (item.est_cny) bits.push('约 ¥' + Number(item.est_cny).toFixed(2))
+          if (item.voice) bits.push(item.voice)
+          if (item.json_ok === true) bits.push('JSON 有效')
+          else if (item.json_ok === false) bits.push('JSON 无效')
+          if (bits.length) row.append(el('span', { class: 'msg', text: bits.join(' · ') }))
+          return row
+        }
+        function card(kind, group, item, idx, media) {
+          const letter = '模型 ' + String.fromCharCode(65 + idx)
+          const head = el('div', { class: 'row' }, nameNode(letter, data.labels[item.provider] || item.provider))
+          if (item.mode) head.append(el('span', { class: 'tag', text: MODES[item.mode] || item.mode }))
+          const body = el('div', { class: 'body' }, head, statusRow(item))
+          if (item.message) body.append(el('div', { class: 'msg', text: item.message }))
+          if (item.state === 'done' && item.scorable !== false) body.append(scoreRow(kind, item.key))
+          return el(
+            'div',
+            { class: 'card' },
+            media || el('div', { class: 'empty', text: STATES[item.state] || '没有结果' }),
+            body,
+          )
+        }
+        function prompt(label, text) {
+          if (!text) return null
+          return el('details', {}, el('summary', { text: label }), el('pre', { class: 'prompt', text: text }))
+        }
+
+        const main = document.getElementById('main')
+        const nav = document.getElementById('nav')
+        document.getElementById('meta').textContent =
+          data.run + ' · 生成于 ' + data.generated_at + ' · 已花费约 ¥' + data.spent_cny
+
+        for (const c of data.cases) {
+          const portrait = c.aspect === '9:16' || c.aspect === '3:4'
+          const sec = el('section', { class: 'case', id: 'case-' + c.id })
+          sec.append(
+            el('h2', { text: c.title }),
+            el('div', { class: 'sub', text: [c.direction, c.route, c.aspect].filter(Boolean).join(' · ') }),
+          )
+          if (c.check) sec.append(el('div', { class: 'check', text: '看点：' + c.check }))
+          sec.append(prompt('视频提示词', c.video_prompt), prompt('文生视频提示词', c.t2v_prompt))
+          for (const s of c.segments) sec.append(prompt('长镜头 ' + s.from + ' → ' + s.to, s.prompt))
+
+          if (c.keyframes.some((k) => k.images.length)) {
+            sec.append(el('h3', { text: '关键帧' }))
+            for (const kf of c.keyframes) {
+              if (kf.prompt) sec.append(prompt('关键帧 ' + kf.id + ' 提示词', kf.prompt))
+              const grid = el('div', { class: 'grid' + (portrait ? ' portrait' : '') })
+              blindOrder(c.id + '|' + kf.id, kf.images).forEach((img, i) => {
+                const media = img.src ? el('img', { src: img.src, loading: 'lazy', alt: '关键帧 ' + kf.id }) : null
+                grid.append(card('image', c.id, img, i, media))
+              })
+              sec.append(grid)
+            }
+          }
+          sec.append(el('h3', { text: '视频' }))
+          const grid = el('div', { class: 'grid' + (portrait ? ' portrait' : '') })
+          if (!c.videos.length) grid.append(el('div', { class: 'empty', text: '还没有结果' }))
+          blindOrder(c.id, c.videos).forEach((v, i) => {
+            const media = v.src
+              ? el('video', { src: v.src, controls: '', preload: 'metadata', playsinline: '', loop: '' })
+              : null
+            grid.append(card('video', c.id, v, i, media))
+          })
+          sec.append(grid)
+          main.append(sec)
+          nav.append(el('a', { href: '#case-' + c.id, text: c.title.split('（')[0] }))
+        }
+
+        if (data.speech.some((s) => s.items.length)) {
+          const sec = el('section', { class: 'case', id: 'speech' }, el('h2', { text: '配音' }))
+          for (const s of data.speech) {
+            sec.append(el('h3', { text: s.title }), prompt('文本', s.text))
+            const grid = el('div', { class: 'grid' })
+            blindOrder(s.id, s.items).forEach((it, i) => {
+              const media = it.src ? el('audio', { src: it.src, controls: '', preload: 'none' }) : null
+              grid.append(card('tts', s.id, it, i, media))
+            })
+            sec.append(grid)
+          }
+          main.append(sec)
+          nav.append(el('a', { href: '#speech', text: '配音' }))
+        }
+
+        if (data.llm.some((t) => t.items.length)) {
+          const sec = el('section', { class: 'case', id: 'llm' }, el('h2', { text: '文案（LLM 盲评）' }))
+          for (const t of data.llm) {
+            sec.append(el('h3', { text: t.title }), prompt('任务', t.prompt))
+            const grid = el('div', { class: 'grid', style: '--min: 360px' })
+            blindOrder(t.id, t.items).forEach((it, i) => {
+              const media = it.text ? el('div', { class: 'llm-text', text: it.text }) : null
+              grid.append(card('llm', t.id, it, i, media))
+            })
+            sec.append(grid)
+          }
+          main.append(sec)
+          nav.append(el('a', { href: '#llm', text: '文案' }))
+        }
+
+        document.getElementById('reveal').addEventListener('click', (e) => {
+          revealed = !revealed
+          for (const n of nameNodes) n.textContent = revealed ? n.dataset.real : n.dataset.blind
+          e.target.textContent = revealed ? '隐藏模型名' : '显示模型名'
+        })
+        document.getElementById('export').addEventListener('click', () => {
+          const blob = new Blob(
+            [JSON.stringify({ run: data.run, exported_at: new Date().toISOString(), scores }, null, 2)],
+            { type: 'application/json' },
+          )
+          const a = el('a', { href: URL.createObjectURL(blob), download: 'scores-' + data.run + '.json' })
+          document.body.append(a)
+          a.click()
+          a.remove()
+        })
+      })()
+    </script>
+  </body>
+</html>
