@@ -2,7 +2,9 @@
 
 协议：每条消息 = 4 字节小端长度 + UTF-8 JSON。请求 {"cmd": ..., ...}，回复 {"ok": true, ...} 或
 {"ok": false, "error": ...}。Chrome 每次 sendNativeMessage 都会拉起一个新进程，所以这里只做快操作；
-生成草稿、发布这类慢操作交给 jobs 在独立进程里跑，面板轮询 job 状态。
+生成内嵌版这类慢操作交给 jobs 在独立进程里跑，面板轮询 job 状态。
+
+面板不能生成草稿（用户 2026-10-10 去掉了“生成草稿”按钮）：早报只在 Claude Code 里生成，见 stages.py。
 """
 import json
 import os
@@ -92,22 +94,6 @@ def cmd_status(settings, msg) -> dict:
         out["published"] = store.has_published(day)
         store.close()
     return out
-
-
-def cmd_run(settings, msg) -> dict:
-    day = _day(msg)
-    args = ["--date", day.isoformat()]
-    if msg.get("force"):
-        args.append("--force")
-    if msg.get("no_llm"):
-        args.append("--no-llm")
-    else:
-        ready = llm_config.readiness(settings)
-        if not ready["ready"]:
-            raise ValueError("模型还没配好：" + "；".join(ready["problems"]) + "。去“模型设置”里配置，或勾选“不用 LLM”试跑")
-    if _paths(settings, day)["article"].exists() and not msg.get("force"):
-        raise ValueError("当天的草稿已经存在，可能已经改过；确定要重新生成请勾选“覆盖”（旧稿会备份成 .bak）")
-    return {"job": jobs.start("run", args, settings.jobs_dir)}
 
 
 def cmd_publish(settings, msg) -> dict:
@@ -225,7 +211,6 @@ def cmd_llm_test(settings, msg) -> dict:
 COMMANDS = {
     "ping": lambda s, m: {"version": VERSION, "vault": str(s.vault)},
     "status": cmd_status,
-    "run": cmd_run,
     "publish": cmd_publish,
     "job": lambda s, m: {"job": jobs.status(s.jobs_dir)},
     "read_embed": cmd_read_embed,

@@ -7,7 +7,7 @@ from io import BytesIO
 from pathlib import Path
 
 import httpx
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageStat, UnidentifiedImageError
 
 from .net import UA, get
 
@@ -69,9 +69,15 @@ def _download(http, url: str, referer: str | None) -> bytes | None:
     return None
 
 
+def is_blank(img: Image.Image) -> bool:
+    """几乎纯黑或纯白的图。视频推文的封面常是视频首帧，全黑（2026-10-10 的头条就是）。"""
+    stat = ImageStat.Stat(img.convert("L").resize((64, 64)))
+    return stat.stddev[0] < 2 and (stat.mean[0] < 10 or stat.mean[0] > 245)
+
+
 def save_image(http, url: str, dest: Path, *, referer: str | None = None, min_width: int = 320,
                min_height: int = 160) -> bool:
-    """下载成功且尺寸够用返回 True。SVG、太小的图标、打不开的图都跳过。"""
+    """下载成功且尺寸够用返回 True。SVG、太小的图标、纯黑或纯白的图、打不开的图都跳过。"""
     data = _download(http, url, referer)
     if data is None or len(data) > MAX_BYTES:
         return False
@@ -82,6 +88,9 @@ def save_image(http, url: str, dest: Path, *, referer: str | None = None, min_wi
     except (UnidentifiedImageError, OSError, EOFError):
         return False
     if img.width < min_width or img.height < min_height:
+        return False
+    if is_blank(img):
+        log.info("配图是纯色图，跳过：%s", url)
         return False
     has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
     img = img.convert("RGBA" if has_alpha else "RGB")

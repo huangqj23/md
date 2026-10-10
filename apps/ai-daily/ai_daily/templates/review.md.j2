@@ -4,22 +4,37 @@
 
 ## 审稿清单
 
+{% if by_claude %}
+- [x] 选题、写稿、核对：Claude 已完成（没有调用模型），改动见下面的“核对记录”
+- [ ] 审一遍正文和头条的“我的看法”
+{% else %}
 - [ ] 头条的“我的看法”：让 Claude 生成时由它以工程师视角起草，审一遍；正文里还是【我的看法：待写】就补上
 - [ ] 处理正文里的【待核对】（共 {{ n_flags }} 处）：核对原文、改好正文，再删掉标记
+{% endif %}
 - [ ] 从下面的候选标题里选一个，替换正文第一行
 - [ ] （可选）在快讯前面加“今日一测”
 - [ ] 运行 `ai-daily publish --date {{ day }}`，生成内嵌版后用 md 存到公众号草稿箱；发表时在创作声明里选 AI 相关的声明，不声明原创
 
+{% if notes %}
+## 核对记录
+
+{% for n in notes %}
+- {{ n }}
+{% endfor %}
+
+{% endif %}
 ## 候选标题
 
 {% for t in titles %}
 {{ loop.index }}. {{ t }}
 {% endfor %}
 
+{% if not by_claude %}
 ## 头条的 AI 建议角度
 
 写“我的看法”时可参考：{{ headline.engineer_note or "（无）" }}
 
+{% endif %}
 ## 备选
 
 没进正文的事件。想换进去，就把整段复制到对应栏目，自己写一两句。
@@ -27,7 +42,7 @@
 {% for ev in backup %}
 ### {{ ev.title }}
 
-`{{ ev.label }}` · {{ track_name(ev.track) }} · {{ ev.score | round(0) | int }} 分 · [{{ ev.main_item.source_name }}]({{ ev.main_item.url }})
+`{{ ev.label }}` · {{ track_name(ev.track) }}{% if not by_claude %} · {{ ev.score | round(0) | int }} 分{% endif %} · [{{ ev.main_item.source_name }}]({{ ev.main_item.url }})
 
 {{ ev.why or clip(ev.main_item.summary, 120) }}
 

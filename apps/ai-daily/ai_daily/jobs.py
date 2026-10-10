@@ -1,7 +1,7 @@
-"""后台任务：浏览器扩展触发的 run / publish 在独立进程里跑，状态写到 data/jobs/state.json。
+"""后台任务：浏览器扩展触发的 publish（生成内嵌版）在独立进程里跑，状态写到 data/jobs/state.json。
 
 Chrome 在 native host 断开 2 秒后会杀掉它所在的 Job 对象（连同子进程），所以任务进程要用
-CREATE_BREAKAWAY_FROM_JOB 脱离出来，关掉面板也不会中断正在生成的草稿。
+CREATE_BREAKAWAY_FROM_JOB 脱离出来，关掉面板也不会中断正在跑的任务。
 """
 import ctypes
 import json
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .config import ROOT
 
-KINDS = {"run", "publish"}
+KINDS = {"publish"}
 LOG_TAIL_CHARS = 4000
 
 DETACHED_PROCESS = 0x00000008

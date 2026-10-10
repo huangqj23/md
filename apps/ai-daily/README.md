@@ -1,10 +1,15 @@
 # ai-daily · hollis23 AI 早报
 
-每天自动采集 AI 动态，去重、选题、写中文初稿，落到 Obsidian（`<vault>/AI_Daily/YYYY-MM/`），人工审稿后发公众号。
+每天采集 AI 动态，去重、选题、写中文初稿，落到 Obsidian（`<vault>/AI_Daily/YYYY-MM/`），人工审稿后发公众号。
 
 定位：工程师向，覆盖 LLM、Agent、视觉多模态（主线只用于封面统计，正文不分栏）；每条标可信度，摘要附原文句，程序核对出处。
 
 ## 流程
+
+两种生成方式，采集、去重、配图、封面、发布都一样：
+
+- **Claude Code 选题写稿**（2026-10-10 起的默认做法，不调用模型）：`prepare` → Claude 写 `plan.json` → `materials` → Claude 写正文 → `finalize`，见下文“让 Claude Code 直接生成”。
+- **调用模型**（命令行的 `ai-daily run`；浏览器面板的“生成草稿”按钮 2026-10-10 去掉了，早报一律在 Claude Code 里生成）：
 
 ```
 collect（官方博客 / 国内大模型公司的官方渠道 / 海外媒体 / newsletter / HF / OpenRouter / GitHub / HN / Reddit / 手动投喂）
@@ -57,7 +62,7 @@ collect（官方博客 / 国内大模型公司的官方渠道 / 海外媒体 / n
 
 ## 文末页脚
 
-正文最后是“图片版权归原作者，出处见图注。”、关注**Hollis的视觉大模型实战**的宣传语（`templates/daily.md.j2`）和公众号二维码名片。二维码引用 vault 品牌目录里的 `_brand/hollis23/wechat-qrcode_nowm_wxonly.png`（相对正文写成 `../../_brand/hollis23/…`）：
+正文最后是“图片版权归原作者，出处见图注。”、关注**Hollis的视觉大模型实战**的宣传语（`render.footer()`，模板和 `materials.md` 都用它）和公众号二维码名片。二维码引用 vault 品牌目录里的 `_brand/hollis23/wechat-qrcode_nowm_wxonly.png`（相对正文写成 `../../_brand/hollis23/…`）：
 
 - 文件不在时，`ai-daily publish` 的检查会报“图片不存在”，内嵌版不会带坏链接；
 - `_nowm`：内嵌时不加水印；`_wxonly`：内嵌时带 `data-publish-only="wechat"`，md 多平台同步时只发公众号，其他平台去掉二维码、保留文字。
@@ -74,9 +79,12 @@ copy .env.example .env      # vault 路径等；模型和 key 推荐在浏览器
 ## 用法
 
 ```powershell
+.venv\Scripts\ai-daily prepare                    # Claude 流程第 1 步：采集、去重，写 data/work/<日期>/candidates.md
+.venv\Scripts\ai-daily materials                  # 第 2 步：按 plan.json 抓原文、下配图，写 materials.md
+.venv\Scripts\ai-daily finalize                   # 第 3 步：检查正文，生成审稿清单、封面和联系表 contact.png
 .venv\Scripts\ai-daily collect --show 20          # 只看各信源采到多少条（不记录条目）
 .venv\Scripts\ai-daily run --no-llm --out D:\tmp  # 不花钱试跑：启发式选题、原文节选，单独的试跑库
-.venv\Scripts\ai-daily run                        # 正式运行，写到 vault；当天重新生成加 --force（旧稿备份成 .bak）
+.venv\Scripts\ai-daily run                        # 调用模型生成，写到 vault；当天重新生成加 --force（旧稿备份成 .bak）
 .venv\Scripts\ai-daily preview                    # 把当天草稿渲染成自带图片的 HTML 预览页（data/previews/）
 .venv\Scripts\ai-daily publish                    # 审完稿后：检查 → 内嵌版 → 记录已发链接
 powershell -ExecutionPolicy Bypass -File scripts\install_task.ps1   # 每天 07:00 自动运行（先配好模型）
@@ -86,17 +94,17 @@ powershell -ExecutionPolicy Bypass -File scripts\install_task.ps1   # 每天 07:
 
 ## 让 Claude Code 直接生成
 
-在 vault（`D:\Obisidian`）里打开 Claude Code，说“生成今天的 AI 早报”，或者输入 `/ai-daily`（可以带日期）。流程写在 vault 的 `.claude/skills/ai-daily/SKILL.md` 里：
+在 vault（`D:\Obisidian`）里打开 Claude Code，说“生成今天的 AI 早报”，或者输入 `/ai-daily`（可以带日期）。流程写在 vault 的 `.claude/skills/ai-daily/SKILL.md` 里，选题、写稿、核对都由 Claude 完成，不调用模型，目标 20 分钟内交付：
 
-1. 先检查模型配置、草稿有没有被改过、GitHub API 额度；
-2. 用命令行生成；
-3. 检查国内媒体、旧闻、主来源、标题、【待核对】和配图；
-4. 用 `ai-daily preview` 生成预览页，发成只有你能看的 Artifact 页面；
-5. 汇报还要你做的事：写“我的看法”、处理【待核对】、选标题。
+1. `ai-daily prepare`（约 70 秒）：采集、去重、合并同一链接或标题很像的条目，丢掉来源全早于窗口的旧闻，写 `data/work/<日期>/candidates.md`（每个候选一行，附近 3 天写过的标题）。本期的生成时间记在这一步。
+2. Claude 选题，写 `plan.json`：`headline`、`main`、`briefs`、`backup` 填候选编号；`E3+E9` 把两个候选并成一个事件，`url:<链接>` 收候选里没有的新闻；`tracks` 可改封面统计用的主线。
+3. `ai-daily materials`（约 20 秒）：并行抓原文（httpx 被 403 时改用系统 curl）、查显存、下配图（纯黑纯白的视频首帧会跳过），写 `materials.md`：每条的来源行、配图行、原文节选，末尾是文末页脚。改了 plan.json 再跑，只处理新换进来的条目，Claude 自己放进去的配图不会被删。
+4. Claude 照 `materials.md` 一次写完正文，再把候选标题、封面短标题、核对记录写进 plan.json（`titles`、`cover_lines`、`notes`）。
+5. `ai-daily finalize`（几秒）：检查结构（看点 3 条、条数、每条有图、工程师视角、文末、国内媒体、纯色图），提醒“来源打不开”这类说法；写审稿清单和封面，记下草稿链接供之后去重，拼联系表 `contact.png`。有要改的返回 1。
 
 ## 浏览器面板（md 扩展里的“AI 早报”）
 
-同一仓库的 md Chrome / Edge 扩展（`apps/web`）里有“AI 早报”面板，能在浏览器里生成草稿、看待办、生成内嵌版、载入编辑器，也能在任意网页右键“投喂到 AI 早报”。它通过 Native Messaging 调用本目录的 `ai-daily-host.exe`（`ai_daily/native_host.py`），构建扩展后注册一次（macOS 上把 `.venv\Scripts\` 换成 `.venv/bin/`）：
+同一仓库的 md Chrome / Edge 扩展（`apps/web`）里有“AI 早报”面板，能在浏览器里看待办、生成内嵌版、载入编辑器，也能在任意网页右键“投喂到 AI 早报”。草稿不在面板里生成（见上文“让 Claude Code 直接生成”）。它通过 Native Messaging 调用本目录的 `ai-daily-host.exe`（`ai_daily/native_host.py`），构建扩展后注册一次（macOS 上把 `.venv\Scripts\` 换成 `.venv/bin/`）：
 
 ```powershell
 .venv\Scripts\ai-daily install-host        # 按 apps/web/.output/chrome-mv3 的路径算出扩展 ID
@@ -106,11 +114,11 @@ powershell -ExecutionPolicy Bypass -File scripts\install_task.ps1   # 每天 07:
 
 换电脑不用拷 `data/ai_daily.db`：每次生成前会从 vault 里前 7 天的正文补记写过的链接和标题，从审稿清单的“生成时间”补上一期的生成时间（`ai_daily/history.py`）。
 
-慢操作（run / publish）在独立的后台进程里跑，状态在 `data/jobs/`，关掉面板不会中断。详细说明见 [docs/ai-daily.md](../../docs/ai-daily.md)。
+生成内嵌版（publish）在独立的后台进程里跑，状态在 `data/jobs/`，关掉面板不会中断。详细说明见 [docs/ai-daily.md](../../docs/ai-daily.md)。
 
 ## 模型与 key
 
-在 md 扩展“AI 早报”面板的“模型设置”里配置（`ai-daily llm-status` 可以在命令行查看当前生效的配置）：
+只给 `ai-daily run` 用；Claude Code 生成早报不调用模型，不用配。在 md 扩展“AI 早报”面板的“模型设置”里配置（`ai-daily llm-status` 可以在命令行查看当前生效的配置）：
 
 - **两个用途分别选厂商和模型**：选题（一次读 ~200 条候选，用便宜、长上下文的模型）和写稿（逐条写，质量优先），可以是不同厂商。
 - **预置厂商**（`ai_daily/providers.py`，地址在 2026-09-30 逐个核实）：DeepSeek、通义千问（百炼）、Kimi、智谱 GLM、MiniMax、豆包（火山方舟）、硅基流动、OpenRouter、OpenAI、Google Gemini、xAI Grok、Claude（Anthropic 官方 SDK）、Ollama / 本机或内网服务。另外可以添加任意 OpenAI 兼容接口（自建 vLLM、代理等）。

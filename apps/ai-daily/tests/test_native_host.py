@@ -88,12 +88,11 @@ def test_bad_date_and_unknown_command(settings):
     assert nh.handle({"cmd": "rm"}, settings)["ok"] is False
 
 
-def test_run_guards(settings):
-    r = nh.handle({"cmd": "run", "date": DAY}, settings)
-    assert not r["ok"] and "模型还没配好" in r["error"] and "还没有填 API key" in r["error"]
-    write_draft(settings)
-    r = nh.handle({"cmd": "run", "date": DAY, "no_llm": True}, settings)
-    assert not r["ok"] and "覆盖" in r["error"]
+def test_panel_cannot_generate_drafts(settings):
+    # 2026-10-10：面板去掉了“生成草稿”，早报只在 Claude Code 里生成
+    assert nh.handle({"cmd": "run", "date": DAY}, settings) == {"ok": False, "error": "未知命令：run"}
+    with pytest.raises(ValueError):
+        jobs.start("run", ["--date", DAY], settings.jobs_dir)
 
 
 def test_publish_returns_problems_without_starting_a_job(settings):

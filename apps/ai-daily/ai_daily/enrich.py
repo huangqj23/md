@@ -10,17 +10,18 @@
 """
 import logging
 import re
+import subprocess
 from urllib.parse import urljoin, urlsplit
 
 import httpx
 import trafilatura
 from bs4 import BeautifulSoup
 
-from . import vram
+from . import images, vram
 from .collect import hf
 from .collect.inbox import TWEET, fetch_tweet, tweet_media
 from .models import LABELS, Event, Item, canonical_url, pick_primary
-from .net import get
+from .net import UA, get
 from .textutil import clip
 
 log = logging.getLogger(__name__)
@@ -35,6 +36,9 @@ GENERIC_IMAGES = ("cdn-thumbnails.huggingface.co/social-thumbnails/models/", "op
 MAX_BODY_IMAGES = 2          # og:image 不能用时，从正文里取的图数
 SKIP_IMAGE = re.compile(r"logo|icon|avatar|qr_?code|/themes?/|placeholder|loading|blank|spacer|sprite|banner|emoji"
                         r"|nologin", re.I)
+# og:image 不按 banner 过滤：MarkTechPost 每篇文章的头图都叫 WP-BLOG-BANNER-…（2026-10-10）；
+# 全站通用的横幅一般在 /themes/ 下，上面那条照样能挡住
+SKIP_OG_IMAGE = re.compile(SKIP_IMAGE.pattern.replace("|banner", ""), re.I)
 SKIP_BLOCK = re.compile(r"header|nav|footer|sidebar|related|recommend|comment|author|share|qrcode|banner|toolbar"
                         r"|menu", re.I)
 
@@ -57,7 +61,7 @@ def page_images(soup: BeautifulSoup, base: str) -> list[str]:
     正文图优先取懒加载的真实地址（data-original / data-src），跳过页头、导航、作者栏、横幅里的图。"""
     out = []
     og = _meta(soup, "og:image", "twitter:image")
-    if og and not SKIP_IMAGE.search(og):
+    if og and not SKIP_OG_IMAGE.search(og):
         out.append(urljoin(base, og))
     body = []
     for img in soup.find_all("img"):
@@ -76,15 +80,40 @@ def page_images(soup: BeautifulSoup, base: str) -> list[str]:
     return out + body
 
 
+def _curl_html(url: str) -> str | None:
+    """httpx 被 403 时用系统 curl 再打开一次。MarkTechPost 等站按 TLS 指纹拦 Python，curl 能打开（2026-10-10 实测）；
+    Bloomberg 这类付费墙 curl 也打不开。"""
+    curl = images._curl_path()
+    if not curl:
+        return None
+    cmd = [curl, "-sSL", "--fail", "--max-time", "30", "-A", UA, "-H", "Accept: text/html,application/xhtml+xml",
+           "-H", "Accept-Language: en-US,en;q=0.9", url]
+    try:
+        out = subprocess.run(cmd, capture_output=True, timeout=40,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0 or not out.stdout:
+        return None
+    log.info("网页用 curl 打开成功（httpx 403）：%s", url)
+    return out.stdout.decode("utf-8", "replace")
+
+
 def fetch_page(http, url: str) -> tuple[str, list[str], str | None]:
     """(正文, 可用作配图的图片, 网站名)。正文用 trafilatura 抽取；不是 HTML 返回空。"""
-    resp = get(http, url, retries=1)
-    if "html" not in resp.headers.get("content-type", ""):
-        return "", [], None
-    html = resp.text
+    try:
+        resp = get(http, url, retries=1)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code != 403 or not (html := _curl_html(url)):
+            raise
+        base = url
+    else:
+        if "html" not in resp.headers.get("content-type", ""):
+            return "", [], None
+        html, base = resp.text, str(resp.url)
     soup = BeautifulSoup(html, "lxml")
-    text = trafilatura.extract(html, url=str(resp.url), include_comments=False, include_tables=True) or ""
-    return text, page_images(soup, str(resp.url)), _meta(soup, "og:site_name")
+    text = trafilatura.extract(html, url=base, include_comments=False, include_tables=True) or ""
+    return text, page_images(soup, base), _meta(soup, "og:site_name")
 
 
 def _model_vram(http, repo_id: str) -> tuple[str, str]:
@@ -126,7 +155,8 @@ def _rename_from_site(item: Item, site_name: str | None) -> None:
         item.source_name = " ".join(site_name.split())[:40]
 
 
-def enrich_event(http, ev: Event) -> None:
+def enrich_event(http, ev: Event, light: bool = False) -> None:
+    """light：快讯只要一段原文，不打开其他来源找图和补正文。"""
     it = ev.primary = pick_primary(ev.items, ev.title)
     text = it.meta.get("text") or it.summary
     cands = _Candidates()
@@ -152,14 +182,14 @@ def enrich_event(http, ev: Event) -> None:
         log.warning("抓原文失败 %s：%s", it.url, _brief(e))
     else:
         failed = None
-    if not ev.vram:            # 主来源是博客、但事件里有 HF 模型仓库时，也算一下显存
+    if not ev.vram and not light:      # 主来源是博客、但事件里有 HF 模型仓库时，也算一下显存
         model = next((x for x in ev.items if x.kind == "model"), None)
         if model:
             try:
                 ev.vram, _ = _model_vram(http, model.meta["repo_id"])
             except httpx.HTTPError as e:
                 log.warning("查模型详情失败 %s：%s", model.url, _brief(e))
-    extra = _other_sources(http, ev, it, cands)
+    extra = [] if light else _other_sources(http, ev, it, cands)
     if len(text) < SHORT_SOURCE_CHARS:
         for name, body in extra:
             text += f"\n\n（以下摘自{name}）\n{clip(body, MAX_SOURCE_CHARS // 2)}"

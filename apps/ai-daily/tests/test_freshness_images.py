@@ -4,6 +4,7 @@ from datetime import date, timedelta
 
 import httpx
 import httpx2
+import pytest
 from bs4 import BeautifulSoup
 
 from ai_daily import enrich, pipeline, triage
@@ -297,3 +298,26 @@ def test_image_403_falls_back_to_system_curl(tmp_path, monkeypatch):
         assert not images.save_image(http, "https://img.example.com/gone.png", tmp_path / "c.png")   # 404 不走 curl
     assert (tmp_path / "a.png").exists() and not (tmp_path / "b.png").exists()
     assert len(calls) == 2 and calls[0][calls[0].index("-e") + 1] == "https://developer.nvidia.com/blog/x"
+
+
+def test_page_403_falls_back_to_system_curl(monkeypatch):
+    # 2026-10-10：MarkTechPost 对 httpx 一律 403，系统 curl 能打开；Bloomberg 这类 curl 也打不开，照旧报错
+    from types import SimpleNamespace
+
+    from ai_daily import enrich, images
+    page = ('<html><head><meta property="og:image" content="https://cdn.example.com/2026/10/WP-BLOG-BANNER-4-1.png">'
+            '</head><body><article>'
+            '<p>Nace.AI has open-sourced Drex 1.5, a 9B decision model that scores options instead of writing text.</p>'
+            '</article></body></html>')
+
+    def fake_run(cmd, **kw):
+        ok = "marktechpost" in cmd[-1]
+        return SimpleNamespace(returncode=0 if ok else 22, stdout=page.encode() if ok else b"")
+
+    monkeypatch.setattr(images, "_curl_path", lambda: "/usr/bin/curl")
+    monkeypatch.setattr(enrich.subprocess, "run", fake_run)
+    with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(403))) as http:
+        text, imgs, _ = enrich.fetch_page(http, "https://www.marktechpost.com/2026/10/09/drex/")
+        assert "Drex 1.5" in text and imgs == ["https://cdn.example.com/2026/10/WP-BLOG-BANNER-4-1.png"]  # 文章头图
+        with pytest.raises(httpx.HTTPStatusError):
+            enrich.fetch_page(http, "https://www.bloomberg.com/news/articles/x")

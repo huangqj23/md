@@ -48,6 +48,29 @@ def _others(ev: Event) -> list:
     return out[:2]
 
 
+def badge(ev: Event) -> str:
+    """来源行：可信度 · 主来源 · 日期 · 另见其他来源。"""
+    it = ev.main_item
+    line = f"`{ev.label}` · [{it.source_name}]({it.url})"
+    if it.published:
+        line += f" · {_local_date(it.published)}"
+    others = _others(ev)
+    if others:
+        line += " · 另见 " + "、".join(f"[{o.source_name}]({o.url})" for o in others)
+    return line
+
+
+FOLLOW_LINE = "关注**Hollis的视觉大模型实战**：每天一份 AI 早报，只看一手来源；视觉与多模态大模型的论文精读和动手复现，也在这里。"
+
+
+def footer(qr_code: str | None) -> str:
+    """文末：版权说明、关注语（公众号名照二维码名片写）、二维码名片。"""
+    parts = ["---", "图片版权归原作者，出处见图注。", FOLLOW_LINE]
+    if qr_code:
+        parts.append(f"![微信扫码关注 Hollis的视觉大模型实战]({qr_code})")
+    return "\n\n".join(parts)
+
+
 def _tidy(md: str) -> str:
     md = "\n".join(line.rstrip() for line in md.splitlines())
     return re.sub(r"\n{3,}", "\n\n", md).strip() + "\n"
@@ -63,19 +86,21 @@ def relative_ref(target: Path, from_dir: Path) -> str:
 
 def render_article(layout: Layout, editor: dict, qr_code: str | None = None) -> str:
     """头条 + 要闻（按分数平铺，不分栏）+ 快讯；qr_code 是文末二维码相对正文的路径。"""
-    return _tidy(template("daily.md.j2", title=editor["titles"][0], highlights=editor["highlights"], qr_code=qr_code,
-                          headline=layout.headline, main=layout.main, briefs=layout.briefs,
-                          local_date=_local_date, others=_others))
+    return _tidy(template("daily.md.j2", title=editor["titles"][0], highlights=editor["highlights"],
+                          footer=footer(qr_code), headline=layout.headline, main=layout.main, briefs=layout.briefs,
+                          badge_line=badge))
 
 
 def render_review(day: date, stem: str, layout: Layout, editor: dict, article_md: str, *, stats: dict,
-                  n_items: int, n_candidates: int, n_events: int, llm_usage: str, generated: str = "") -> str:
+                  n_items: int, n_candidates: int, n_events: int, llm_usage: str, generated: str = "",
+                  notes: list[str] = (), by_claude: bool = False) -> str:
+    """by_claude：选题和写稿是 Claude 做的（ai-daily prepare / materials / finalize），notes 是它的核对记录。"""
     return _tidy(template(
         "review.md.j2", day=day.isoformat(), article_stem=stem, n_flags=article_md.count(FLAG_MARK),
         titles=editor["titles"], headline=layout.headline, backup=layout.backup,
         track_name=lambda t: TRACK_NAMES.get(t, "其他"), clip=clip,
         stats=sorted(stats.items(), key=lambda kv: str(kv[0])), n_items=n_items, n_candidates=n_candidates,
-        n_events=n_events, llm_usage=llm_usage, generated=generated))
+        n_events=n_events, llm_usage=llm_usage, generated=generated, notes=list(notes), by_claude=by_claude))
 
 
 def cover_spec(day: date, issue: int, layout: Layout, editor: dict) -> dict:

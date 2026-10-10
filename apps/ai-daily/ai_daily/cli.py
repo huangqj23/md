@@ -1,4 +1,5 @@
-"""命令行：ai-daily run / collect / publish / preview / llm-status / install-host。"""
+"""命令行：ai-daily prepare / materials / finalize（Claude 选题写稿）、run（调用模型）、collect / publish / preview /
+llm-status / install-host。"""
 import argparse
 import logging
 import sys
@@ -54,6 +55,60 @@ def cmd_run(args, settings, sources) -> int:
             return 2
     print(f"\n正文：{result.article}\n审稿清单与备选：{result.review}\n封面：{'已生成' if result.cover_ok else '未生成'}（{result.cover_json}）")
     print(f"待核对 {result.n_flags} 处。改完后运行：ai-daily publish --date {day}")
+    return 0
+
+
+def cmd_prepare(args, settings, sources) -> int:
+    from . import stages
+    day = _day(args.date)
+    with make_client() as http:
+        try:
+            r = stages.prepare(settings, sources, day=day, now=datetime.now(timezone.utc), http=http, force=args.force)
+        except FileExistsError as e:
+            print(f"错误：{e}")
+            return 2
+    print(f"\n候选：{r.candidates}（{r.n_events} 个事件，窗口 {r.since.astimezone():%m-%d %H:%M} 之后）")
+    print(f"选好后写 {r.plan}，再运行：ai-daily materials --date {day}")
+    return 0
+
+
+def cmd_materials(args, settings, sources) -> int:
+    from . import stages
+    day = _day(args.date)
+    with make_client() as http:
+        try:
+            r = stages.materials(settings, sources, day=day, http=http)
+        except stages.PlanError as e:
+            print(f"错误：{e}")
+            return 2
+    print(f"\n素材：{r.path}（这次新抓 {r.fetched} 条原文；配图 {r.images} 张）")
+    if r.no_image:
+        print("没下到配图：" + "、".join(r.no_image))
+    for slot, flags in r.flags.items():
+        print(f"  {slot}：{'；'.join(flags)}")
+    print(f"照素材写好正文后运行：ai-daily finalize --date {day}")
+    return 0
+
+
+def cmd_finalize(args, settings, sources) -> int:
+    from . import stages
+    day = _day(args.date)
+    try:
+        r = stages.finalize(settings, sources, day=day)
+    except stages.PlanError as e:
+        print(f"错误：{e}")
+        return 2
+    print(f"\n审稿清单：{r.review}\n封面：{'已生成' if r.cover_ok else '未生成'}（{r.cover_json}）")
+    if r.contact:
+        print(f"联系表（全部配图 + 封面）：{r.contact}")
+    for w in r.warnings:
+        print(f"  提醒：{w}")
+    if r.problems:
+        print("还要改：")
+        for p in r.problems:
+            print(f"  - {p}")
+        return 1
+    print("检查通过。")
     return 0
 
 
@@ -177,6 +232,13 @@ def main(argv=None) -> int:
     r.add_argument("--force", action="store_true", help="覆盖当天已有的正文（旧稿备份为 .bak）")
     r.add_argument("--no-images", action="store_true", help="不下载配图")
     r.add_argument("--no-cover", action="store_true", help="不生成封面")
+    pr = sub.add_parser("prepare", help="不调模型：采集、去重，写 candidates.md 给 Claude 选题")
+    pr.add_argument("--date", help="稿件日期，默认今天（YYYY-MM-DD）")
+    pr.add_argument("--force", action="store_true", help="当天已有正文时也重来（旧稿移到 .bak）")
+    ma = sub.add_parser("materials", help="按 plan.json 抓原文、下配图，写 materials.md 给 Claude 写稿")
+    ma.add_argument("--date", help="稿件日期，默认今天")
+    fi = sub.add_parser("finalize", help="检查 Claude 写好的正文，生成审稿清单、封面和联系表")
+    fi.add_argument("--date", help="稿件日期，默认今天")
     c = sub.add_parser("collect", help="只采集并打印各信源条数（不写库）")
     c.add_argument("--show", type=int, default=0, help="打印前 N 条")
     p = sub.add_parser("publish", help="发布前检查 + 生成内嵌版 + 记录已发链接")
@@ -195,7 +257,8 @@ def main(argv=None) -> int:
 
     settings, sources = load_settings(), load_sources()
     _setup_logging(settings.log_dir, _day(getattr(args, "date", None)))
-    handler = {"run": cmd_run, "collect": cmd_collect, "publish": cmd_publish,
+    handler = {"run": cmd_run, "prepare": cmd_prepare, "materials": cmd_materials, "finalize": cmd_finalize,
+               "collect": cmd_collect, "publish": cmd_publish,
                "install-host": cmd_install_host, "uninstall-host": cmd_uninstall_host,
                "llm-status": cmd_llm_status, "preview": cmd_preview}[args.cmd]
     return handler(args, settings, sources)

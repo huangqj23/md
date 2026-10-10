@@ -110,21 +110,12 @@ export const useAiDailyStore = defineStore(`aiDaily`, () => {
       return
     }
     if (wasRunning) {
-      const key = reply.job.kind === `publish` ? `publish` : `run`
       if (reply.job.state === `done`)
-        toast.success(t(`aiDaily.job.${key}Done`))
+        toast.success(t(`aiDaily.job.publishDone`))
       else
-        toast.error(t(`aiDaily.job.${key}Failed`))
+        toast.error(t(`aiDaily.job.publishFailed`))
       await refresh()
     }
-  }
-
-  async function startRun(options: { force: boolean, noLlm: boolean }) {
-    const reply = await call<{ job: JobStatus }>({ cmd: `run`, date: date.value, force: options.force, no_llm: options.noLlm })
-    if (!reply)
-      return
-    job.value = reply.job
-    schedulePoll()
   }
 
   /** Returns the blocking problems; an empty list means the embed job started. */
@@ -232,7 +223,6 @@ export const useAiDailyStore = defineStore(`aiDaily`, () => {
     extensionId,
     refresh,
     grant,
-    startRun,
     startPublish,
     loadIntoEditor,
     open,
