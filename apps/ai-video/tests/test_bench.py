@@ -125,6 +125,7 @@ def test_refused_attempts_are_kept_unless_retry(bench):
     b.retry_failed = True
     jobs = [j for j in b.plan_videos()[0] if j.name == "c1.a.t2v"]
     assert jobs and b.read_state("video", "c1.a.t2v")["state"] == "failed"  # planning changes nothing
+    assert jobs[0].estimate == 5  # a retry is a new paid task, even though the old state has a task id
     b.execute(jobs)
     assert len(fake.submitted) == 1  # the old task id is not polled again; a new task is submitted
     assert b.read_state("video", "c1.a.t2v")["state"] == "done"
@@ -188,12 +189,12 @@ def test_crop_windows_step_across_a_scroll(tmp_path):
 def test_keyframe_preference_list_skips_missing_providers(bench):
     b, _ = bench
     case = b.cases[0]
-    b.options["keyframe_provider"] = ["seedream", "seedream_302"]
-    for pid in ("gpt_image_302", "seedream_302"):
+    b.options["keyframe_provider"] = ["seedream", "seedream_alt"]
+    for pid in ("gpt_image", "seedream_alt"):
         path = b.keyframe_file(case, "a", pid)
         path.parent.mkdir(parents=True, exist_ok=True)
         Image.new("RGB", (8, 8)).save(path)
-    assert b.keyframe_for(case, "a").name == "a.seedream_302.png"
+    assert b.keyframe_for(case, "a").name == "a.seedream_alt.png"
 
 
 def test_chain_takes_all_keyframes_from_one_provider(bench):
@@ -202,7 +203,7 @@ def test_chain_takes_all_keyframes_from_one_provider(bench):
     case = b.cases[0]
     case.keyframes = [Keyframe("a"), Keyframe("b"), Keyframe("c")]
     case.segments = [Segment("a", "b", "p1"), Segment("b", "c", "p2")]
-    b.options["keyframe_provider"] = ["seedream_302"]
+    b.options["keyframe_provider"] = ["seedream_alt"]
 
     def add(pid, ids):
         for kf in ids:
@@ -210,14 +211,14 @@ def test_chain_takes_all_keyframes_from_one_provider(bench):
             path.parent.mkdir(parents=True, exist_ok=True)
             Image.new("RGB", (8, 8)).save(path)
 
-    add("seedream_302", "a")           # preferred provider is missing b and c
-    add("gpt_image_302", "ab")
+    add("seedream_alt", "a")           # preferred provider is missing b and c
+    add("gpt_image", "ab")
     assert b.chain_keyframes(case) is None
-    add("gpt_image_302", "c")
-    assert {p.name for p in b.chain_keyframes(case).values()} == {"a.gpt_image_302.png", "b.gpt_image_302.png",
-                                                                  "c.gpt_image_302.png"}
-    add("seedream_302", "bc")
-    assert {p.name.split(".")[1] for p in b.chain_keyframes(case).values()} == {"seedream_302"}
+    add("gpt_image", "c")
+    assert {p.name for p in b.chain_keyframes(case).values()} == {"a.gpt_image.png", "b.gpt_image.png",
+                                                                  "c.gpt_image.png"}
+    add("seedream_alt", "bc")
+    assert {p.name.split(".")[1] for p in b.chain_keyframes(case).values()} == {"seedream_alt"}
 
 
 def test_upload_jpeg_is_capped_in_size_and_resolution(tmp_path):

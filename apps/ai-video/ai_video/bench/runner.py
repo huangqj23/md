@@ -1,12 +1,10 @@
-"""Bench runner: keyframes, clips, speech and LLM drafts for every case × configured provider.
+"""Bench runner: keyframes, clips and speech for every case × configured provider.
 
 A video task id is written to jobs/video/<name>.json before polling starts, so an interrupted run
 resumes polling the same task instead of paying for a new one. Finished outputs are never redone;
 refused or failed attempts are kept (they are results too) unless --retry-failed is given.
 """
-import json
 import logging
-import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -17,44 +15,37 @@ import httpx
 
 from .. import media
 from ..config import Settings, load_yaml
-from ..errors import ProviderError, Rejected
+from ..errors import ProviderError, Rejected, Unconfirmed
 from ..ledger import Ledger
-from ..llm import chat
 from ..net import call, download, make_client
 from ..providers import load_providers
-from ..providers.base import ImageRequest, SpeechRequest, VideoRequest, resolve_base_url
+from ..providers.base import ImageRequest, SpeechRequest, VideoRequest
+from ..tasks import TERMINAL, read_json, run_video, write_json
 from .cases import Case, load_cases
 
 log = logging.getLogger(__name__)
 
 MET_OBJECT = "https://collectionapi.metmuseum.org/public/collection/v1/objects/{}"
 COMMONS_API = "https://commons.wikimedia.org/w/api.php"
-TERMINAL = {"rejected", "failed"}
 STATE_NAMES = {"done": "完成", "rejected": "被拒绝", "failed": "失败", "pending": "等待中",
                "skipped": "跳过", "error": "出错"}
 
 
 @dataclass
 class Job:
-    kind: str                    # image | video | tts | llm
+    kind: str                    # image | video | tts
     name: str
     provider: str
     out: Path
-    estimate: float = 0.0
+    estimate: float = 0.0        # ¥
     case: Case | None = None
     meta: dict = field(default_factory=dict)
+    afp: float = 0.0             # plan credits, for providers billed through a plan
+    plan: str = ""
 
 
 def safe_name(text: str) -> str:
     return re.sub(r"[^\w.-]+", "_", text).strip("_")
-
-
-def strip_fences(text: str) -> str:
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else ""
-        text = text.rsplit("```", 1)[0]
-    return text.strip()
 
 
 class Bench:
@@ -64,8 +55,8 @@ class Bench:
         self.settings = settings
         self.options = cfg.get("bench") or {}
         self.providers = load_providers(cfg)
-        self.llm_cfg = cfg.get("llm") or {}
-        all_cases, self.speech_cases, self.llm_tasks = load_cases(settings.cases_file)
+        self.plans = cfg.get("plans") or {}
+        all_cases, self.speech_cases = load_cases(settings.cases_file)
         unknown = set(cases or []) - {c.id for c in all_cases}
         if unknown:
             raise ValueError(f"没有这些用例：{', '.join(sorted(unknown))}")
@@ -89,16 +80,9 @@ class Bench:
     def inactive(self, kind: str) -> list[tuple[str, list[str]]]:
         return [(pid, p.missing()) for pid, p in self.providers[kind].items() if not p.ready and self._selected(pid)]
 
-    def llm_providers(self) -> list[tuple[str, dict]]:
-        """LLM entries the bench calls; `manual: true` entries are written by hand and only reported."""
-        return [(pid, c) for pid, c in self.llm_cfg.items()
-                if self._selected(pid) and not c.get("manual") and c.get("model")
-                and os.environ.get(c.get("key_env", ""))]
-
     def concurrency(self, kind: str, pid: str) -> int:
         """Tasks in flight per provider, so a run does not trip the provider's concurrency limit."""
-        cfg = self.llm_cfg.get(pid, {}) if kind == "llm" else self.providers[kind][pid].cfg
-        return max(1, int(cfg.get("max_concurrency", 2)))
+        return max(1, int(self.providers[kind][pid].cfg.get("max_concurrency", 2)))
 
     # ------------------------------------------------------------ paths and state
 
@@ -116,9 +100,6 @@ class Bench:
 
     def speech_file(self, case_id: str, pid: str, voice: str) -> Path:
         return self.root / "tts" / f"{case_id}.{pid}.{safe_name(voice)}.mp3"
-
-    def llm_file(self, task_id: str, pid: str) -> Path:
-        return self.root / "llm" / f"{task_id}.{pid}.md"
 
     def keyframe_order(self, case: Case) -> list[str]:
         """Image providers to take keyframes from: the preferred ones, then any other with files on disk."""
@@ -155,18 +136,10 @@ class Bench:
         return self.root / "jobs" / kind / f"{name}.json"
 
     def read_state(self, kind: str, name: str) -> dict:
-        try:
-            return json.loads(self.state_file(kind, name).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
+        return read_json(self.state_file(kind, name))
 
     def save_state(self, kind: str, name: str, state: dict) -> dict:
-        path = self.state_file(kind, name)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, path)
-        return state
+        return write_json(self.state_file(kind, name), state)
 
     def _blocked(self, kind: str, name: str) -> bool:
         """A refused/failed attempt is a result; it is only redone with --retry-failed. Planning never
@@ -187,9 +160,9 @@ class Bench:
                 missing = [kf for kf in case.keyframes if not self.keyframe_file(case, kf.id, p.id).exists()]
                 name = f"{case.id}.{p.id}"
                 if missing and not self._blocked("image", name):
-                    estimate = p.estimate(ImageRequest(prompt="")) * len(missing)
+                    cny, afp = p.cost(ImageRequest(prompt="", ratio=case.aspect))
                     jobs.append(Job("image", name, p.id, self.keyframe_file(case, case.keyframes[-1].id, p.id),
-                                    estimate, case))
+                                    cny * len(missing), case, afp=afp * len(missing), plan=p.plan_id))
         return jobs
 
     def video_specs(self, case: Case) -> list[dict]:
@@ -225,9 +198,11 @@ class Bench:
                     if reason:
                         skipped.append((name, reason))
                         continue
-                    # A task already submitted costs nothing more to finish.
-                    estimate = 0.0 if self.read_state("video", name).get("task_id") else p.estimate(stub)
-                    jobs.append(Job("video", name, p.id, out, estimate, case, spec))
+                    # A task still running costs nothing more to finish; a retried one is a new task.
+                    prior = self.read_state("video", name)
+                    running = prior.get("task_id") and prior.get("state") not in TERMINAL
+                    cny, afp = (0.0, 0.0) if running else p.cost(stub)
+                    jobs.append(Job("video", name, p.id, out, cny, case, spec, afp=afp, plan=p.plan_id))
         return jobs, skipped
 
     def plan_speech(self) -> list[Job]:
@@ -239,20 +214,8 @@ class Bench:
                     out = self.speech_file(sc.id, p.id, voice)
                     if out.exists() or self._blocked("tts", name):
                         continue
-                    req = SpeechRequest(text=sc.text, voice=voice, speed=sc.speed)
+                    req = SpeechRequest(text=sc.text, voice=voice, speed=sc.speed, style=sc.style)
                     jobs.append(Job("tts", name, p.id, out, p.estimate(req), meta={"request": req, "case": sc.id}))
-        return jobs
-
-    def plan_llm(self) -> list[Job]:
-        jobs = []
-        for task in self.llm_tasks:
-            for pid, cfg in self.llm_providers():
-                name = f"{task.id}.{pid}"
-                out = self.llm_file(task.id, pid)
-                if out.exists() or self._blocked("llm", name):
-                    continue
-                jobs.append(Job("llm", name, pid, out, float(cfg.get("price_cny_per_call", 0.05)),
-                                meta={"task": task, "cfg": cfg}))
         return jobs
 
     # ------------------------------------------------------------ execution
@@ -284,15 +247,18 @@ class Bench:
                 pool.shutdown(wait=True)
         return results
 
-    def _charge(self, job: Job, cny: float, **extra) -> None:
-        self.ledger.add(run=self.run_name, kind=job.kind, provider=job.provider, name=job.name, cny=round(cny, 3), **extra)
+    def _charge(self, job: Job, cny: float, afp: float = 0.0, **extra) -> None:
+        record = dict(run=self.run_name, kind=job.kind, provider=job.provider, name=job.name, cny=round(cny, 3), **extra)
+        if afp and job.plan:
+            record.update(plan=job.plan, afp=round(afp, 1))
+        self.ledger.add(**record)
 
     def _run_image(self, job: Job) -> dict:
         p = self.providers["image"][job.provider]
         case = job.case
         done = 0
         started = time.time()
-        with make_client() as http:
+        with p.client() as http:
             prev: Path | None = None
             for kf in case.keyframes:
                 out = self.keyframe_file(case, kf.id, p.id)
@@ -303,11 +269,15 @@ class Bench:
                         data = p.generate(http, req)
                     except Rejected as e:
                         return self.save_state("image", job.name, {"state": "rejected", "keyframe": kf.id, "message": str(e)})
+                    except Unconfirmed as e:
+                        self._charge(job, *p.cost(req), keyframe=kf.id, status="unconfirmed")
+                        return self.save_state("image", job.name, {"state": "failed", "keyframe": kf.id,
+                                                                   "message": f"结果未知（可能已扣费）：{e}"})
                     except ProviderError as e:
                         return self.save_state("image", job.name, {"state": "failed", "keyframe": kf.id, "message": str(e)})
                     out.parent.mkdir(parents=True, exist_ok=True)
                     out.write_bytes(data)
-                    self._charge(job, p.estimate(req), keyframe=kf.id)
+                    self._charge(job, *p.cost(req), keyframe=kf.id)
                     done += 1
                 prev = out
         return self.save_state("image", job.name, {"state": "done", "generated": done,
@@ -316,10 +286,10 @@ class Bench:
     def _run_video(self, job: Job) -> dict:
         p = self.providers["video"][job.provider]
         case, spec = job.case, job.meta
-        state = self.read_state("video", job.name)
-        if state.get("state") in TERMINAL:  # only planned with --retry-failed: start over with a new task
-            state = {}
-        if not state.get("task_id"):
+        state_path = self.state_file("video", job.name)
+        state = read_json(state_path)
+        req, base = None, {}
+        if state.get("state") in TERMINAL or not state.get("task_id"):  # a new task is needed
             first = last = None
             if spec["mode"] == "chain":
                 frames = self.chain_keyframes(case)
@@ -333,86 +303,35 @@ class Bench:
                     return {"state": "skipped", "message": "缺少关键帧，先运行 bench images"}
             req = VideoRequest(prompt=spec["prompt"], duration=case.duration, ratio=case.aspect,
                                first_frame=first, last_frame=last, audio=spec["audio"])
+            cny, afp = p.cost(req)
             base = {"case": case.id, "provider": p.id, "model": p.model, "mode": spec["mode"],
-                    "seg": spec.get("seg"), "est_cny": round(p.estimate(req), 3),
+                    "seg": spec.get("seg"), "est_cny": round(cny, 3), "est_afp": round(afp, 1),
                     "keyframes": [x.name for x in (first, last) if x]}
-            with make_client() as http:
-                try:
-                    task_id = p.submit(http, req)
-                except Rejected as e:
-                    return self.save_state("video", job.name, {**base, "state": "rejected", "message": str(e)})
-                except ProviderError as e:
-                    return self.save_state("video", job.name, {**base, "state": "failed", "message": str(e)})
-            state = self.save_state("video", job.name, {**base, "state": "pending", "task_id": task_id,
-                                                        "submitted_at": time.time()})
-        return self._wait(job, p, state)
-
-    def _wait(self, job: Job, p, state: dict) -> dict:
-        deadline = time.time() + self.timeout_seconds
-        with make_client() as http:
-            while True:
-                try:
-                    status = p.poll(http, state["task_id"])
-                except ProviderError as e:  # transient query errors: keep polling until the deadline
-                    log.warning("%s 查询失败：%s", job.name, e)
-                    status = None
-                if status and status.state != "pending":
-                    break
-                if time.time() > deadline:
-                    state["message"] = "等待超时，任务可能还在排队；再次运行会继续查询，不会重新提交"
-                    return self.save_state("video", job.name, state)
-                time.sleep(self.poll_seconds)
-            state.update(state=status.state, message=status.message, usage=status.usage, finished_at=time.time())
-            state["latency_s"] = round(state["finished_at"] - state["submitted_at"], 1)
-            if status.state == "done":
-                if not status.url:
-                    state.update(state="failed", message="接口没有返回视频地址")
-                else:
-                    try:
-                        self.fetch(http, status.url, job.out)
-                    except ProviderError as e:
-                        state.update(state="failed", message=f"下载失败：{e}")
-                    else:
-                        self._charge(job, state.get("est_cny", 0.0), mode=state.get("mode"))
-        return self.save_state("video", job.name, state)
+        return run_video(p, req, job.out, state_path, base, poll_seconds=self.poll_seconds,
+                         timeout_seconds=self.timeout_seconds, fetch=self.fetch,
+                         on_done=lambda st: self._charge(job, *p.settle(st), mode=st.get("mode"), task_id=st.get("task_id")),
+                         on_unconfirmed=lambda st: self._charge(job, st.get("est_cny", 0.0), st.get("est_afp", 0.0),
+                                                                mode=st.get("mode"), status="unconfirmed"))
 
     def _run_tts(self, job: Job) -> dict:
         p = self.providers["tts"][job.provider]
         req: SpeechRequest = job.meta["request"]
         started = time.time()
         base = {"case": job.meta["case"], "provider": p.id, "voice": req.voice}
-        with make_client() as http:
+        with p.client() as http:
             try:
                 audio = p.synthesize(http, req)
             except Rejected as e:
                 return self.save_state("tts", job.name, {**base, "state": "rejected", "message": str(e)})
+            except Unconfirmed as e:
+                self._charge(job, job.estimate, status="unconfirmed")
+                return self.save_state("tts", job.name, {**base, "state": "failed", "message": f"结果未知（可能已扣费）：{e}"})
             except ProviderError as e:
                 return self.save_state("tts", job.name, {**base, "state": "failed", "message": str(e)})
         job.out.parent.mkdir(parents=True, exist_ok=True)
         job.out.write_bytes(audio)
         self._charge(job, job.estimate)
         return self.save_state("tts", job.name, {**base, "state": "done", "latency_s": round(time.time() - started, 1)})
-
-    def _run_llm(self, job: Job) -> dict:
-        task, cfg = job.meta["task"], job.meta["cfg"]
-        started = time.time()
-        base = {"task": task.id, "provider": job.provider, "model": cfg["model"]}
-        with make_client() as http:
-            try:
-                text = chat(http, resolve_base_url(cfg), os.environ[cfg["key_env"]], cfg["model"], task.prompt)
-            except (ProviderError, KeyError, IndexError) as e:
-                return self.save_state("llm", job.name, {**base, "state": "failed", "message": str(e)})
-        state = {**base, "state": "done", "latency_s": round(time.time() - started, 1)}
-        if task.json:
-            try:
-                json.loads(strip_fences(text))
-                state["json_ok"] = True
-            except ValueError as e:
-                state.update(json_ok=False, message=f"JSON 解析失败：{e}")
-        job.out.parent.mkdir(parents=True, exist_ok=True)
-        job.out.write_text(text, encoding="utf-8")
-        self._charge(job, job.estimate)
-        return self.save_state("llm", job.name, state)
 
     # ------------------------------------------------------------ sources and chains
 

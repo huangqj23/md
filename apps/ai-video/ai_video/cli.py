@@ -1,27 +1,37 @@
-"""Command line: ai-video check / ai-video bench <step>."""
+"""Command line: ai-video check / quota / new / script / make / sheet / projects / bench.
+
+Scripts are written in the conversation (the short-video skill) and imported with `new --script`;
+the CLI never calls a language model.
+"""
 import argparse
-import json
 import logging
 import os
 import shutil
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import httpx
 
+from . import quota
 from .bench.report import write_report
 from .bench.runner import Bench, Job
 from .bench.summary import load_scores, summarize
 from .config import Settings, load_settings, load_yaml
 from .errors import ProviderError
-from .net import make_client
-from .providers import load_providers, relay302
+from .ledger import Ledger
+from .net import call, make_client
+from .pipeline.project import STAGES
+from .pipeline.script import load_script
+from .pipeline.sheet import contact_sheet
+from .pipeline.stages import STAGE_NAMES, Producer
+from .providers import load_providers
 
 KIND_NAMES = {"video": "视频", "image": "图片", "tts": "配音"}
-STEPS = ("images", "videos", "tts", "llm")
-STEP_NAMES = {"images": "关键帧图片", "videos": "视频", "tts": "配音", "llm": "文案（LLM）"}
+STEPS = ("images", "videos", "tts")
+STEP_NAMES = {"images": "关键帧图片", "videos": "视频", "tts": "配音"}
 STEP_KINDS = {"images": "image", "videos": "video", "tts": "tts"}
+PAID_STAGES = ("characters", "keyframes", "videos")
 
 
 def _setup_logging() -> None:
@@ -37,86 +47,170 @@ def _split(value: str | None) -> list[str] | None:
 def cmd_check(args, settings: Settings) -> int:
     cfg = load_yaml(settings.providers_file)
     providers = load_providers(cfg)
-    with make_client(timeout=30) as http:
-        for kind, items in providers.items():
-            print(f"\n{KIND_NAMES[kind]}")
-            for pid, p in items.items():
-                if not p.ready:
-                    status = "未就绪：" + "；".join(p.missing())
-                elif args.ping:
+    for kind, items in providers.items():
+        print(f"\n{KIND_NAMES[kind]}")
+        for pid, p in items.items():
+            if not p.ready:
+                status = "未就绪：" + "；".join(p.missing())
+            elif args.ping:
+                with p.client(timeout=30) as http:
                     try:
                         status = p.ping(http)
                     except (ProviderError, httpx.HTTPError) as e:
                         status = f"连接失败：{e}"
-                else:
-                    status = "就绪"
-                print(f"  {pid:<14} {p.label:<16} {p.model or '-':<30} {status}")
-    print("\nLLM（盲评）")
-    for pid, c in (cfg.get("llm") or {}).items():
-        if c.get("manual"):
-            print(f"  {pid:<14} {c.get('label', pid):<16} {'-':<30} 手工撰写（不调用接口）")
-            continue
-        if not c.get("model"):
-            status = "未就绪：providers.yaml 里没填 model"
-        elif not os.environ.get(c.get("key_env", "")):
-            status = f"未就绪：.env 里没有 {c.get('key_env')}"
-        else:
-            status = "就绪"
-        print(f"  {pid:<14} {c.get('label', pid):<16} {c.get('model') or '-':<30} {status}")
-    print(f"\nffmpeg：{'已安装' if shutil.which('ffmpeg') else '未安装（长镜头片段无法拼接）'}")
+            else:
+                status = "就绪"
+            print(f"  {pid:<14} {p.label:<20} {p.model or '-':<28} {status}")
+            for warning in p.warnings() if p.ready else []:
+                print(f"  {'':<14} ! {warning}")
+    routing = cfg.get("routing") or {}
+    print(f"\n路由：关键帧 {routing.get('image')}，视频 {routing.get('video')}，配音 {routing.get('tts')}")
+    print(f"ffmpeg：{'已安装' if shutil.which('ffmpeg') else '未安装（无法合成成片）'}")
     print(f"数据目录：{settings.data_dir}")
     return 0
 
 
-def cmd_relay_models(args, settings: Settings) -> int:
-    """List what the relay hosts, so model names and voice ids can be copied into providers.yaml.
-    The video model listing is public; voice listings need RELAY_API_KEY."""
-    key = os.environ.get("RELAY_API_KEY", "")
-    base = (os.environ.get("RELAY_BASE_URL") or "https://api.302.ai").rstrip("/")
-    grep = (args.grep or "").lower()
-    out_dir = settings.data_dir / "relay"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    with make_client(timeout=60) as http:
-        try:
-            listing = relay302.video_models(http, base, key)
-        except ProviderError as e:
-            print(f"读取视频模型列表失败：{e}")
-            listing = None
-        if listing is not None:
-            (out_dir / "video_models.json").write_text(json.dumps(listing, ensure_ascii=False, indent=2), encoding="utf-8")
-            entries = listing.get("models") if isinstance(listing, dict) else None
-            if isinstance(entries, list) and all(isinstance(m, dict) and "model_name" in m for m in entries):
-                rows = [(m["model_name"], m.get("provider", ""), m.get("price_text", "")) for m in entries]
-            else:  # unknown layout: names only
-                rows = [(n, "", "") for n in relay302.model_names(listing)]
-            rows = [r for r in rows if not grep or grep in f"{r[0]} {r[1]}".lower()]
-            print(f"302 统一视频接口的模型（{len(rows)} 个{'，筛选：' + args.grep if grep else ''}）")
-            for name, vendor, price in rows:
-                print(f"  {name:<36} {vendor:<12} {price}")
-            print("Seedance、MiniMax H3、可灵官方格式走原生透传，不在这个列表里，见 providers.yaml 的 _302 条目")
-            print(f"完整列表（含各模型支持的参数）：{out_dir / 'video_models.json'}")
+def cmd_quota(args, settings: Settings) -> int:
+    plans = load_yaml(settings.providers_file).get("plans") or {}
+    if not plans:
+        print("providers.yaml 里没有 plans 段")
+        return 0
+    ledger = Ledger(settings.data_dir / "ledger.jsonl")
+    for pid, plan in plans.items():
+        print(f"\n{plan.get('label', pid)}")
+        if plan.get("daily_afp") or plan.get("monthly_afp"):
+            u = quota.usage(ledger, pid, plan)
+            print(f"  今日已用 {u['today']:,.0f} / {u['daily']:,.0f} AFP，本期已用 {u['cycle']:,.0f} / {u['monthly']:,.0f} AFP"
+                  f"（按本机账本；控制台的明细有 0.5–1 天延迟）")
+        if plan.get("remains_url"):
+            key = os.environ.get(plan.get("key_env", ""), "")
+            if not key:
+                print(f"  .env 里没有 {plan.get('key_env')}，查不了剩余额度")
+                continue
+            with make_client(timeout=30) as http:
+                try:
+                    payload = call(http, "GET", plan["remains_url"], headers={"Authorization": f"Bearer {key}"}).json()
+                except ProviderError as e:
+                    print(f"  查询失败：{e}")
+                    continue
+            for line in quota.remains_lines(payload):
+                print(line)
+    return 0
 
-        if not key:
-            print("\n要列配音音色，先在 .env 里填 RELAY_API_KEY")
-            return 0
-        vendors = _split(args.tts) or ["doubao", "minimaxi"]
-        try:
-            providers = relay302.tts_providers(http, base, key, vendors)
-        except ProviderError as e:
-            print(f"\n读取配音音色失败：{e}")
-            return 1
-    (out_dir / "tts_providers.json").write_text(json.dumps(providers, ensure_ascii=False, indent=2), encoding="utf-8")
-    for p in providers:
-        info = p.get("req_params_info") or {}
-        voices = [v for v in info.get("voice_list") or []
-                  if not grep or grep in f"{v.get('voice', '')} {v.get('name', '')}".lower()]
-        models = "、".join(info.get("model_list") or []) or "无"
-        print(f"\n配音 {p.get('provider')}（音色 {len(voices)} 个，可选模型：{models}）")
-        for v in voices[:args.limit]:
-            print(f"  {v.get('voice', ''):<48} {v.get('name', '')} {v.get('gender', '')}")
-        if len(voices) > args.limit:
-            print(f"  …… 还有 {len(voices) - args.limit} 个，用 --grep 筛选或 --limit 调大")
-    print(f"\n完整音色表（含试听链接）：{out_dir / 'tts_providers.json'}")
+
+def _clear_for_redo(ws, project, ids: list[str], done: str) -> None:
+    characters = {c["id"] for c in project.characters}
+    for rid in ids:
+        if rid in characters:
+            cleared = ws.clear_character(project, rid)
+            print(f"{done}角色 {rid} 的参考图" + (f"，以及用到它的关键帧：{', '.join(cleared)}" if cleared else ""))
+            continue
+        shot = project.shot(rid)
+        ws.clear_shot(shot)
+        print(f"{done} {rid} 的配音、关键帧和视频，会重新生成")
+        index = project.shots.index(shot)
+        if index + 1 < len(project.shots) and "prev" in project.shots[index + 1].refs:
+            print(f"  提示：{project.shots[index + 1].id} 以它为参考（prev），需要的话也一起 --redo")
+
+
+def _run_make(producer: Producer, ws, args, settings: Settings) -> int:
+    project = ws.load()
+    producer.draft = args.draft
+    # --estimate deletes nothing: the clears below only mark files as gone so the estimate prices them
+    ws.dry_run = args.estimate
+    done = "将清除" if args.estimate else "已清除"
+    _clear_for_redo(ws, project, _split(args.redo) or [], done)
+    revideo = _split(args.revideo) or []
+    for shot in project.shots if revideo == ["all"] else [project.shot(sid) for sid in revideo]:
+        ws.clear_clip(shot)
+        print(f"{done} {shot.id} 的视频，会用当前路由重新生成")
+    if not args.estimate:
+        ws.save(project)
+    draft_id = (producer.routing.get("video") or {}).get("draft")
+    drafts = [s.id for s in project.shots if draft_id and s.provider == draft_id and ws.has(ws.clip(s))]
+    if drafts and not args.draft:
+        print(f"注意：{', '.join(drafts)} 还是草稿模型（{draft_id}）出的片段，合成会直接用它们；"
+              f"要出正式版就加 --revideo {','.join(drafts)}")
+    until = args.until
+    producer.make(ws, until="script")
+    project = ws.load()
+    print(f"\n《{project.title}》{len(project.shots)} 个镜头，分镜表：{ws.root / 'storyboard.md'}")
+    issues = [i for i in (project.check or {}).get("issues") or [] if not i.get("resolved")]
+    for issue in issues:
+        print(f"  ! 事实核查 {issue.get('shot', '')}：{issue.get('problem', '')}（建议：{issue.get('fix', '')}）")
+    if until == "script" and not args.estimate:
+        print("看过分镜后继续：ai-video make " + project.id)
+        return 0
+    run = STAGES if args.estimate else STAGES[:STAGES.index(until) + 1]
+    paid = [s for s in PAID_STAGES if s in run]
+    cost = producer.estimate(ws, project)
+    cny = sum(cost[s][0] for s in paid)
+    need = sum((cost[s][1] for s in paid), Counter())
+    parts = [f"{STAGE_NAMES[s]} ¥{cost[s][0]}" for s in paid if cost[s][0]]
+    print("\n预计：" + ("，".join(parts) if parts else "没有要花钱的步骤（配音另计，很少）"))
+    lines, ok = quota.afp_gate(producer.plans, producer.ledger, need)
+    if args.estimate:
+        for line in lines:
+            print(line)
+        return 0
+    budget = args.budget if args.budget is not None else settings.budget_cny
+    if not confirm(cny, budget, args.yes, lines, ok):
+        return 1
+    report = producer.make(ws, until=until, bgm=args.bgm)
+    spent = producer.ledger.total(project.id)
+    print(f"\n本项目累计花费约 ¥{spent:.1f}")
+    if report.get("final"):
+        print(f"成片：{report['final']}")
+        print(f"发布信息：{ws.out / 'publish.md'}")
+    if report["problems"]:
+        print(f"有 {len(report['problems'])} 个问题，处理后用 --redo 重做对应镜头")
+    return 0
+
+
+def cmd_new(args, settings: Settings) -> int:
+    producer = Producer(settings)
+    ws, warnings = producer.new_from_script(load_script(args.script))
+    print(f"新项目 {ws.root.name}：{ws.root}")
+    for warning in warnings:
+        print(f"  ? {warning}")
+    return _run_make(producer, ws, args, settings)
+
+
+def cmd_make(args, settings: Settings) -> int:
+    producer = Producer(settings)
+    return _run_make(producer, producer.open(args.project), args, settings)
+
+
+def cmd_script(args, settings: Settings) -> int:
+    producer = Producer(settings)
+    ws = producer.open(args.project)
+    changes, warnings = producer.import_script(ws, load_script(args.file))
+    for warning in warnings:
+        print(f"  ? {warning}")
+    rows = [("角色参考图", changes.characters), ("配音和视频", changes.audio), ("关键帧和视频", changes.keyframes),
+            ("只重做视频", changes.clips), ("删掉的镜头", changes.removed)]
+    if not changes:
+        print("剧本已更新，没有要重做的产物")
+    for name, ids in rows:
+        if ids:
+            print(f"  {name}：{', '.join(ids)}")
+    print(f"分镜表：{ws.root / 'storyboard.md'}\n继续制作：ai-video make {ws.root.name}")
+    return 0
+
+
+def cmd_sheet(args, settings: Settings) -> int:
+    producer = Producer(settings)
+    ws = producer.open(args.project)
+    print(f"联系表：{contact_sheet(ws, ws.load(), args.what)}")
+    return 0
+
+
+def cmd_projects(args, settings: Settings) -> int:
+    producer = Producer(settings)
+    for project in producer.list_projects():
+        final = producer.projects_dir / project.id / "out" / "final.mp4"
+        state = "已出片" if final.exists() else (f"{len(project.shots)} 个镜头" if project.shots else "没有剧本")
+        print(f"  {project.id}  {project.aspect:<5} {state:<8} {project.title or project.prompt}")
     return 0
 
 
@@ -130,8 +224,6 @@ def plan(bench: Bench, steps: tuple[str, ...]) -> dict[str, list[Job]]:
             jobs[step], skipped = bench.plan_videos()
         elif step == "tts":
             jobs[step] = bench.plan_speech()
-        else:
-            jobs[step] = bench.plan_llm()
 
     for step, items in jobs.items():
         print(f"\n{STEP_NAMES[step]}：{len(items)} 个任务，约 ¥{sum(j.estimate for j in items):.1f}")
@@ -140,27 +232,30 @@ def plan(bench: Bench, steps: tuple[str, ...]) -> dict[str, list[Job]]:
             per[job.provider].append(job)
         for pid, group in per.items():
             print(f"  {pid:<14} {len(group):>3} 个  约 ¥{sum(j.estimate for j in group):.1f}")
-        kind = STEP_KINDS.get(step)
-        for pid, reasons in (bench.inactive(kind) if kind else []):
+        for pid, reasons in bench.inactive(STEP_KINDS[step]):
             print(f"  {pid:<14} 未启用：{'；'.join(reasons)}")
-        if step == "llm":
-            ready = {pid for pid, _ in bench.llm_providers()}
-            for pid, c in bench.llm_cfg.items():
-                if pid not in ready and not c.get("manual") and (not bench.only or pid in bench.only):
-                    print(f"  {pid:<14} 未启用：没填 model 或 .env 里没有 key")
     for name, reason in skipped:
         print(f"  跳过 {name}：{reason}")
     return jobs
 
 
-def confirm(total: float, budget: float, yes: bool) -> bool:
-    print(f"\n预计花费约 ¥{total:.1f}（按 providers.yaml 的参考单价估算，以各家账单为准）")
+def confirm(total: float, budget: float, yes: bool, afp_lines: list[str] = (), afp_ok: bool = True) -> bool:
+    print(f"\n预计花费约 ¥{total:.1f}（按 providers.yaml 的单价和套餐抵扣系数估算，以各家账单为准）")
+    for line in afp_lines:
+        print(line)
+    if not afp_ok:
+        print("超过套餐额度，没有执行（套餐请保持关闭「超额后付费」，避免额外账单）")
+        return False
     if total > budget:
-        print(f"超过预算 ¥{budget:.0f}：用 --budget 调高，或用 --cases / --providers 缩小范围")
+        print(f"超过预算 ¥{budget:.0f}：用 --budget 调高，或缩小范围")
         return False
     if yes or total == 0:
         return True
-    return input("继续？[y/N] ").strip().lower() == "y"
+    try:
+        return input("继续？[y/N] ").strip().lower() == "y"
+    except EOFError:
+        print("没有交互输入：看过预计花费后加 -y 重新运行")
+        return False
 
 
 def cmd_bench(args, settings: Settings) -> int:
@@ -182,9 +277,14 @@ def cmd_bench(args, settings: Settings) -> int:
     jobs = plan(bench, steps)
     if args.step == "plan":
         return 0
-    total = sum(j.estimate for items in jobs.values() for j in items)
+    all_jobs = [j for items in jobs.values() for j in items]
+    need: Counter = Counter()
+    for job in all_jobs:
+        if job.plan:
+            need[job.plan] += job.afp
+    lines, ok = quota.afp_gate(bench.plans, bench.ledger, need)
     budget = args.budget if args.budget is not None else settings.budget_cny
-    if not confirm(total, budget, args.yes):
+    if not confirm(sum(j.estimate for j in all_jobs), budget, args.yes, lines, ok):
         return 1
 
     for step in steps:
@@ -201,21 +301,49 @@ def cmd_bench(args, settings: Settings) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="ai-video", description="AI 短视频流水线（Phase 0：模型对比测试）")
+    parser = argparse.ArgumentParser(prog="ai-video", description="AI 短视频流水线：导入剧本出片（new / script / make），以及模型对比测试（bench）")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_check = sub.add_parser("check", help="检查 providers.yaml 和 .env 的配置")
     p_check.add_argument("--ping", action="store_true", help="调用一次不收费的接口，验证 key 是否有效")
+    sub.add_parser("quota", help="套餐额度：方舟今日 / 本期已用（按本机账本），MiniMax 剩余额度")
 
-    p_relay = sub.add_parser("relay-models", help="列出 302.AI 中转上的视频模型名和配音音色")
-    p_relay.add_argument("--grep", help="按关键字筛选，如 seedance、kling、女")
-    p_relay.add_argument("--tts", help="要列音色的配音供应商，逗号分隔，默认 doubao,minimaxi")
-    p_relay.add_argument("--limit", type=int, default=30, help="每个配音供应商最多显示几个音色")
+    def add_make_args(p):
+        p.add_argument("--until", choices=STAGES, default="compose",
+                       help="做到哪一步为止：script 只看分镜，characters 先看角色参考图，keyframes 先看关键帧")
+        p.add_argument("--redo", help="重做这些镜头或角色（逗号分隔，如 s03,shusheng）：镜头清掉配音、关键帧和视频，"
+                                      "角色清掉参考图和用到它的关键帧")
+        p.add_argument("--revideo", help="只重做这些镜头的视频（逗号分隔，或 all），配音和关键帧保留；可用来把草稿升级成正式版")
+        p.add_argument("--draft", action="store_true",
+                       help="草稿模式：所有镜头用 routing.video.draft（便宜的模型）先出一版，看节奏再升级")
+        p.add_argument("--bgm", type=Path, help="背景音乐文件，自动压在人声下面")
+        p.add_argument("--budget", type=float, help="本次预算上限（元），默认取 .env 的 BENCH_BUDGET_CNY")
+        p.add_argument("--estimate", action="store_true", help="只打印还要花的钱和套餐额度，不执行")
+        p.add_argument("--yes", "-y", action="store_true", help="不再询问，直接开始")
 
-    p_bench = sub.add_parser("bench", help="Phase 0 模型对比测试")
-    p_bench.add_argument("step", choices=["plan", "images", "videos", "tts", "llm", "run", "report", "summary"],
-                         help="plan 只列任务和预算；run 依次跑 images → videos → tts → llm")
-    p_bench.add_argument("--run", default="phase0", help="这一轮测试的名字（数据目录 data/bench/<run>）")
+    p_new = sub.add_parser("new", help="导入剧本 JSON（Claude 在对话里写好的）新建项目并开始制作")
+    p_new.add_argument("--script", type=Path, required=True, help="剧本 JSON 文件，格式见 short-video 技能")
+    add_make_args(p_new)
+
+    p_script = sub.add_parser("script", help="给已有项目导入修改后的剧本，只重做改动过的镜头")
+    p_script.add_argument("project", help="项目 id（latest 表示最近一个）")
+    p_script.add_argument("file", type=Path, help="修改后的剧本 JSON")
+
+    p_make = sub.add_parser("make", help="继续制作已有项目（每一步都可以重跑）")
+    p_make.add_argument("project", nargs="?", default="latest", help="项目 id，默认最近一个")
+    add_make_args(p_make)
+
+    p_sheet = sub.add_parser("sheet", help="生成联系表图片：全部关键帧、视频中间帧或成片抽帧")
+    p_sheet.add_argument("project", nargs="?", default="latest", help="项目 id，默认最近一个")
+    p_sheet.add_argument("--what", choices=["keyframes", "clips", "final"], default="keyframes")
+
+    sub.add_parser("projects", help="列出成片项目")
+
+    p_bench = sub.add_parser("bench", help="模型对比测试")
+    p_bench.add_argument("step", choices=["plan", "images", "videos", "tts", "run", "report", "summary"],
+                         help="plan 只列任务和预算；run 依次跑 images → videos → tts")
+    p_bench.add_argument("--run", default="round2",
+                         help="这一轮测试的名字（数据目录 data/bench/<run>）；phase0 是之前的测试结果，别覆盖")
     p_bench.add_argument("--cases", help="只跑这些用例，逗号分隔")
     p_bench.add_argument("--providers", help="只用这些模型，逗号分隔（providers.yaml 里的 id）")
     p_bench.add_argument("--retry-failed", action="store_true", help="重新提交被拒绝或失败的任务")
@@ -230,7 +358,8 @@ def main(argv: list[str] | None = None) -> int:
             stream.reconfigure(errors="replace")
     _setup_logging()
     settings = load_settings()
-    commands = {"check": cmd_check, "relay-models": cmd_relay_models, "bench": cmd_bench}
+    commands = {"check": cmd_check, "quota": cmd_quota, "bench": cmd_bench, "new": cmd_new, "script": cmd_script,
+                "make": cmd_make, "sheet": cmd_sheet, "projects": cmd_projects}
     try:
         return commands[args.cmd](args, settings)
     except (ValueError, FileNotFoundError) as e:

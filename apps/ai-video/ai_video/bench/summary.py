@@ -5,6 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import mean
 
+from ..providers.base import VideoRequest
 from .report import gather
 from .runner import Bench
 
@@ -12,7 +13,6 @@ DIMS = {
     "video": ("quality", "motion", "adherence"),
     "image": ("quality", "adherence"),
     "tts": ("natural", "prosody"),
-    "llm": ("writing", "accuracy"),
 }
 STATE_COLS = (("done", "完成"), ("rejected", "被拒绝"), ("failed", "失败"), ("pending", "等待中"))
 
@@ -39,9 +39,10 @@ def _table(header: list[str], rows: list[list[str]]) -> list[str]:
 def summarize(bench: Bench, scores: dict) -> str:
     data = gather(bench)
     labels = data["labels"]
-    prices = {pid: float(p.cfg.get("price_cny_per_second", 0)) for pid, p in bench.providers["video"].items()}
-    lines = [f"# Phase 0 结果汇总（{bench.run_name}）", "",
-             f"生成于 {data['generated_at']}，已花费约 ¥{data['spent_cny']}（按 providers.yaml 的参考单价估算）。",
+    # ¥ per second, for breaking ties; plan-billed providers convert their credits to ¥.
+    prices = {pid: p.estimate(VideoRequest(prompt="", duration=5)) / 5 for pid, p in bench.providers["video"].items()}
+    lines = [f"# 模型对比结果汇总（{bench.run_name}）", "",
+             f"生成于 {data['generated_at']}，已花费约 ¥{data['spent_cny']}（按单价和套餐抵扣系数估算）。",
              "分数是三项（画面、运动、遵循）的平均分，满分 5，括号里是打过分的条数。", ""]
 
     # Routing: content type (case.route; text-to-video kept apart) × provider.
@@ -102,7 +103,7 @@ def summarize(bench: Bench, scores: dict) -> str:
                   for title, v in problems]
         lines.append("")
 
-    # Keyframe images, speech and LLM drafts: mean score per provider (per voice for speech).
+    # Keyframe images and speech: mean score per provider (per voice for speech).
     def provider_means(kind: str, groups) -> list[list[str]]:
         acc: dict[str, list[float]] = defaultdict(list)
         for item, name in groups:
@@ -119,10 +120,6 @@ def summarize(bench: Bench, scores: dict) -> str:
                                       for s in data["speech"] for it in s["items"]))
     if tts_rows:
         lines += ["## 配音", ""] + _table(["模型 · 音色", "平均分"], tts_rows) + [""]
-    llm_rows = provider_means("llm", ((it, labels.get(it["provider"], it["provider"]))
-                                      for t in data["llm"] for it in t["items"]))
-    if llm_rows:
-        lines += ["## 文案（LLM）", ""] + _table(["模型", "平均分"], llm_rows) + [""]
 
     text = "\n".join(lines)
     out = bench.root / "summary.md"

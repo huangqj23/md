@@ -241,15 +241,6 @@
         background: var(--panel);
         color: var(--ink);
       }
-      .llm-text {
-        white-space: pre-wrap;
-        font-size: 13px;
-        max-height: 420px;
-        overflow: auto;
-        background: var(--chip);
-        padding: 8px;
-        border-radius: 6px;
-      }
       @media (max-width: 600px) {
         .grid,
         .grid.portrait {
@@ -288,10 +279,6 @@
           tts: [
             ['natural', '自然'],
             ['prosody', '韵律'],
-          ],
-          llm: [
-            ['writing', '文采'],
-            ['accuracy', '准确'],
           ],
         }
         const MODES = { i2v: '图生视频', t2v: '文生视频', chain: '长镜头' }
@@ -380,8 +367,6 @@
           if (item.latency_s) bits.push('耗时 ' + Math.round(item.latency_s) + ' 秒')
           if (item.est_cny) bits.push('约 ¥' + Number(item.est_cny).toFixed(2))
           if (item.voice) bits.push(item.voice)
-          if (item.json_ok === true) bits.push('JSON 有效')
-          else if (item.json_ok === false) bits.push('JSON 无效')
           if (bits.length) row.append(el('span', { class: 'msg', text: bits.join(' · ') }))
           return row
         }
@@ -459,21 +444,6 @@
           }
           main.append(sec)
           nav.append(el('a', { href: '#speech', text: '配音' }))
-        }
-
-        if (data.llm.some((t) => t.items.length)) {
-          const sec = el('section', { class: 'case', id: 'llm' }, el('h2', { text: '文案（LLM 盲评）' }))
-          for (const t of data.llm) {
-            sec.append(el('h3', { text: t.title }), prompt('任务', t.prompt))
-            const grid = el('div', { class: 'grid', style: '--min: 360px' })
-            blindOrder(t.id, t.items).forEach((it, i) => {
-              const media = it.text ? el('div', { class: 'llm-text', text: it.text }) : null
-              grid.append(card('llm', t.id, it, i, media))
-            })
-            sec.append(grid)
-          }
-          main.append(sec)
-          nav.append(el('a', { href: '#llm', text: '文案' }))
         }
 
         document.getElementById('reveal').addEventListener('click', (e) => {

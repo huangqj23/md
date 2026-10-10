@@ -1,142 +1,128 @@
-# Phase 0 用到的模型。
-# - model：到各家控制台核对后填写；留空或 enabled: false 的条目会跳过。
-# - price_*：公开报道、各家和 302.AI 价格页的参考价（2026-10），只用来估算预算。请改成实际单价。
-#   302.AI 按 PTC 计价，1 PTC 约等于 1 美元，这里按 7.2 元折算。
-# - max_concurrency：同一家同时在跑的任务数，超过账号的并发上限会被限流。
+# 模型配置（2026-10）。图像、视频、配音走自己开通的订阅；文案由 Claude 在对话里写（short-video 技能），这里不配置任何文本模型。
 #
-# 两种接法，按 .env 里填了哪些 key 自动启用：
-# - 直连：各家自己的 key（ARK_API_KEY、KLING_*、MINIMAX_API_KEY……）
-# - 302.AI 中转（id 以 _302 结尾）：只填 RELAY_API_KEY；国内网络可把 RELAY_BASE_URL 设为 https://api.302ai.com
-# 两种 key 都填会两边都跑、花双份钱，想只跑一边可以用 --providers 指定。
+# - 方舟 Agent Plan（Large）：Seedance 视频、Seedream 图片。专属地址 /api/plan/v3 加专属 key（ARK_PLAN_API_KEY），
+#   按 AFP 抵扣。这个 key 只用于图片和视频模型：套餐条款不允许用 API 调用文本和向量模型。控制台请保持「超额后付费」关闭。
+# - MiniMax M Plan（Build）：H3 视频、speech-2.8 配音。订阅 key（sk-cp- 开头）直接调原接口，按目录价扣套餐额度，
+#   视频只受周额度限制；这里的 price_* 只是折算成人民币的估算值。
+# - Gemini API：默认配音 gemini-3.8-flash-tts（有免费层），可选图片 Nano Banana 2.1（没有免费层，要开通 Google Cloud 结算）。
+#   国内要走代理，地址写在 .env 的 GEMINI_PROXY。
+#
+# 字段：
+# - plan：按哪个套餐计费（见 plans）；afp_coef / afp_per_image：套餐抵扣系数，换分辨率时同步改 afp_coef
+# - price_*：不按套餐 AFP 计的模型的参考单价（元），只用来估算预算
+# - key_prefix：套餐 key 的开头，填错成按量 key 时 `ai-video check` 会提醒
+# - max_concurrency：同一家同时在跑的任务数
+# - enabled: false：保留配置但不启用
+
+plans:
+  ark:
+    label: 火山方舟 Agent Plan（Large）
+    cny_per_afp: 0.002 # ¥500 / 250,000 AFP
+    daily_afp: 125000 # 日额度是月额度的一半；图片、视频模型没有 5 小时和周限额
+    monthly_afp: 250000
+    cycle_day: 9 # 计费月从每月几号开始：按 2026-10-09 购买填的，不对就改成你的购买日
+  minimax:
+    label: MiniMax M Plan（Build）
+    key_env: MINIMAX_API_KEY
+    remains_url: https://www.minimax.cn/v1/token_plan/remains
 
 video:
+  # Seedance 的 AFP = (24 × 秒数 + 1) × 宽 × 高 / 1024 / 10000 × 抵扣系数。抵扣系数（输入不含视频）：
+  # 2.0：480p / 720p 230，1080p 255；2.0 fast：185；2.0 mini：115；2.5：480p / 720p 350，1080p 385。
+  # 时长是 4–15 秒的整数（2.5 可到 30 秒）；fast 和 mini 只有 480p、720p。
   seedance:
     adapter: ark_video
     label: Seedance 2.0
-    key_env: ARK_API_KEY
-    base_url: https://ark.cn-beijing.volces.com/api/v3
-    model: doubao-seedance-2-0-260128
-    resolution: 720p # Seedance 2.0 / 2.0 fast 不支持 1080p
-    price_cny_per_second: 1.0 # 46 元/百万 token，720p 每秒约 2.16 万 token
+    plan: ark
+    key_env: ARK_PLAN_API_KEY
+    base_url: https://ark.cn-beijing.volces.com/api/plan/v3
+    model: doubao-seedance-2.0
+    resolution: 720p
+    afp_coef: {480p: 230, 720p: 230, 1080p: 255} # 720p 每秒约 500 AFP（约 ¥1）
     max_concurrency: 2
+  seedance_fast:
+    adapter: ark_video
+    label: Seedance 2.0 Fast
+    plan: ark
+    key_env: ARK_PLAN_API_KEY
+    base_url: https://ark.cn-beijing.volces.com/api/plan/v3
+    model: doubao-seedance-2.0-fast
+    resolution: 720p
+    afp_coef: 185
+    max_concurrency: 2
+  seedance_mini:
+    adapter: ark_video
+    label: Seedance 2.0 Mini
+    plan: ark
+    key_env: ARK_PLAN_API_KEY
+    base_url: https://ark.cn-beijing.volces.com/api/plan/v3
+    model: doubao-seedance-2.0-mini
+    resolution: 480p
+    afp_coef: 115 # 480p 每秒约 115 AFP（约 ¥0.23），--draft 草稿用
+    max_concurrency: 4 # 草稿便宜，多开几路缩短等待
   seedance_25:
     adapter: ark_video
     label: Seedance 2.5
-    key_env: ARK_API_KEY
-    base_url: https://ark.cn-beijing.volces.com/api/v3
-    model: doubao-seedance-2-5-260628 # 2026-08 发布；以方舟控制台为准
-    resolution: 720p # 和 2.0 同分辨率对比
-    price_cny_per_second: 1.3 # 按 302 价格页 2.5 比 2.0 贵约 27% 推算
-    max_concurrency: 2
-  kling:
-    adapter: kling_video
-    label: 可灵 3.0
-    key_env: KLING_ACCESS_KEY
-    secret_env: KLING_SECRET_KEY
-    base_url: https://api-beijing.klingai.com # 海外账号用 https://api-singapore.klingai.com
-    model: kling-v3
-    mode: pro # pro = 1080p，std = 720p
-    durations: [3, 15] # kling-v3 支持 3–15 秒，旧型号只有 5 / 10 秒
-    price_cny_per_second: 1.0 # 3.0 Turbo 1080p 含音频约 ¥1/秒（单一来源）
+    plan: ark
+    key_env: ARK_PLAN_API_KEY
+    base_url: https://ark.cn-beijing.volces.com/api/plan/v3
+    model: doubao-seedance-2.5
+    resolution: 720p
+    afp_coef: {480p: 350, 720p: 350, 1080p: 385} # 720p 每秒约 756 AFP（约 ¥1.5）
+    max_seconds: 30
     max_concurrency: 2
   h3:
     adapter: minimax_video
     label: MiniMax H3
     key_env: MINIMAX_API_KEY
+    key_prefix: sk-cp-
+    ping_url: https://www.minimax.cn/v1/token_plan/remains # check --ping 用 M Plan 额度接口验证 Key（免费）
     base_url: https://api.minimax.cn
     model: MiniMax-H3
-    resolution: 768P # 2K 约 ¥0.95/秒
-    price_cny_per_second: 0.6 # 768P 约 $0.08/秒
+    resolution: 768P # 2K 更贵
+    price_cny_per_second: 0.6 # 按目录价折算的 M Plan 额度消耗（约 $0.08/秒）
     max_concurrency: 2
-
-  # —— 302.AI 中转：可灵、H3、Seedance 都是原生格式透传，只换地址和 key ——
-  seedance_302:
-    adapter: ark_video # /volcengine/api/v3 下就是方舟原生接口
-    label: Seedance 2.0（302）
-    key_env: RELAY_API_KEY
-    base_url_env: RELAY_BASE_URL
-    base_url: https://api.302.ai
-    base_path: /volcengine/api/v3
-    model: doubao-seedance-2-0-260128 # 快速版 doubao-seedance-2-0-fast-260128
-    resolution: 720p
-    price_cny_per_second: 1.2 # 7.884 PTC/百万 token（输入不含视频）
-    max_concurrency: 2
-  seedance_25_302:
-    adapter: ark_video
-    label: Seedance 2.5（302）
-    key_env: RELAY_API_KEY
-    base_url_env: RELAY_BASE_URL
-    base_url: https://api.302.ai
-    base_path: /volcengine/api/v3
-    model: doubao-seedance-2-5-260628
-    resolution: 720p
-    price_cny_per_second: 1.6 # 10 PTC/百万 token（输入不含视频）
-    max_concurrency: 2
-  kling_302:
-    adapter: kling_video # /klingai 下是可灵官方格式，用 302 的 key 直接鉴权
-    label: 可灵 3.0（302）
-    key_env: RELAY_API_KEY
-    base_url_env: RELAY_BASE_URL
-    base_url: https://api.302.ai
-    base_path: /klingai
+  kling:
+    adapter: kling_video
+    label: 可灵 3.0（按量，未开通）
+    enabled: false
+    key_env: KLING_ACCESS_KEY
+    secret_env: KLING_SECRET_KEY
+    base_url: https://api-beijing.klingai.com # 海外账号用 https://api-singapore.klingai.com
     model: kling-v3
-    mode: pro
+    mode: pro # pro = 1080p，std = 720p
     durations: [3, 15]
-    price_cny_per_second: 2.6 # 302 标价 0.036–0.36 美元/秒，pro + 有声按上限估，以账单为准
-    max_concurrency: 2
-  h3_302:
-    adapter: minimax_video # /minimaxi 下是 MiniMax 视频 V2 格式
-    label: MiniMax H3（302）
-    key_env: RELAY_API_KEY
-    base_url_env: RELAY_BASE_URL
-    base_url: https://api.302.ai
-    base_path: /minimaxi
-    model: MiniMax-H3
-    resolution: 768P
-    price_cny_per_second: 0.52 # 0.0715 PTC/秒（2K 是 0.115）
-    max_concurrency: 2
-  # 下面两家只在 302 统一视频接口里有，默认不跑；想加入对比就删掉 enabled: false。
-  # 302 上全部视频模型及参数：`ai-video relay-models`（公开接口，不需要 key）
-  happyhorse_302:
-    adapter: relay302_video
-    label: HappyHorse 1.0（302）
-    enabled: false
-    key_env: RELAY_API_KEY
-    base_url_env: RELAY_BASE_URL
-    base_url: https://api.302.ai
-    model: happyhorse-1.0
-    models_by_mode: {t2v: happyhorse-1.0-t2v, i2v: happyhorse-1.0-i2v}
-    end_image: false # 不支持尾帧，长镜头用例自动跳过
-    durations: [3, 15]
-    resolution: 720P # 1080P 约 0.276 PTC/秒
-    price_cny_per_second: 1.15 # 720P 0.156 PTC/秒
-    max_concurrency: 2
-  wan27_302:
-    adapter: relay302_video
-    label: 万相 2.7（302）
-    enabled: false
-    key_env: RELAY_API_KEY
-    base_url_env: RELAY_BASE_URL
-    base_url: https://api.302.ai
-    model: wan2.7
-    models_by_mode: {t2v: wan2.7-t2v, i2v: wan2.7-i2v}
-    durations: [2, 15]
-    resolution: 720P
-    price_cny_per_second: 1.1 # 0.1–0.15 PTC/秒，按上限估
+    price_cny_per_second: 1.0
     max_concurrency: 2
 
 image:
   seedream:
     adapter: ark_image
-    label: Seedream 5.0
-    key_env: ARK_API_KEY
-    base_url: https://ark.cn-beijing.volces.com/api/v3
-    model: doubao-seedream-5-0-260128 # 5.0 Pro 是 doubao-seedream-5-0-pro-260628
-    price_cny_per_image: 0.35
+    label: Seedream 5.0 Pro
+    plan: ark
+    key_env: ARK_PLAN_API_KEY
+    base_url: https://ark.cn-beijing.volces.com/api/plan/v3
+    model: doubao-seedream-5-0-pro # 套餐文档的写法；如果报模型不存在，改成 doubao-seedream-5.0-pro
+    afp_per_image: 150 # 1.5K 及以下每张 150，更大 300；代码里的尺寸都在 1.5K 内
+    afp_per_extra_ref: 10 # 参考图第一张免费，第二张起每张 10
+    timeout_seconds: 600 # 实测文生图约 45 秒、带参考图约 80 秒，偶尔会卡几分钟；提前断开不会让服务端停止计费
+    max_concurrency: 2
+  nano_banana:
+    adapter: gemini_image
+    label: Nano Banana 2.1
+    key_env: GEMINI_API_KEY
+    proxy_env: GEMINI_PROXY
+    base_url: https://generativelanguage.googleapis.com/v1beta
+    model: gemini-nano-banana-2.1
+    image_size: 2K
+    thinking_level: medium
+    timeout_seconds: 300
+    price_cny_per_image: 0.36 # 2K 约 $0.05；没有免费层，要开通 Google Cloud 结算
     max_concurrency: 2
   gpt_image:
     adapter: openai_image
-    label: GPT Image 2
+    label: GPT Image 2（按量，未开通）
+    enabled: false
     key_env: OPENAI_API_KEY
     base_url_env: OPENAI_BASE_URL
     base_url: https://api.openai.com/v1
@@ -145,140 +131,52 @@ image:
     price_cny_per_image: 0.6
     max_concurrency: 2
 
-  # —— 302.AI 中转 ——
-  seedream_302:
-    adapter: ark_image # 302 透传方舟图片格式（/doubao）
-    label: Seedream 5.0 Pro（302）
-    key_env: RELAY_API_KEY
-    base_url_env: RELAY_BASE_URL
-    base_url: https://api.302.ai
-    base_path: /doubao
-    model: doubao-seedream-5-0-pro-260628 # 普通版是 doubao-seedream-5-0-260128
-    # 不开 async：这个接口忽略 ?async=true。带参考图时 302 把图转存到 file.302.ai，方舟拉取超时
-    # （HTTP 524 / InvalidParameter），所以经 302 生成关键帧时不要用参考图。
-    price_cny_per_image: 0.31 # 0.043 PTC/张
-    max_concurrency: 2
-  gpt_image_302:
-    adapter: openai_image # 302 的 OpenAI 兼容图片接口（/v1）
-    label: GPT Image 2（302）
-    key_env: RELAY_API_KEY
-    base_url_env: RELAY_BASE_URL
-    base_url: https://api.302.ai
-    base_path: /v1
-    model: gpt-image-2
-    quality: medium
-    async: true # 同步调用经常超过网关 100 秒限制（HTTP 524），改用 302 的异步模式
-    price_cny_per_image: 0.6
-    max_concurrency: 2
-
 tts:
+  gemini_tts:
+    adapter: gemini_tts
+    label: Gemini 3.8 Flash TTS
+    key_env: GEMINI_API_KEY
+    proxy_env: GEMINI_PROXY
+    base_url: https://generativelanguage.googleapis.com/v1beta
+    model: gemini-3.8-flash-tts
+    voices: [Charon, Gacrux, Sadaltager, Algenib] # 预置音色共 30 个；语气由 presets/styles.yaml 的 tts_style 控制
+    price_cny_per_10k_chars: 4 # 按付费价估（免费层内为 0）：和 Nano Banana 共用一个 Key 时，项目一开通结算，配音也开始计费
+    max_concurrency: 2
   minimax_tts:
     adapter: minimax_tts
     label: MiniMax Speech 2.8
     key_env: MINIMAX_API_KEY
+    key_prefix: sk-cp-
+    ping_url: https://www.minimax.cn/v1/token_plan/remains
     base_url: https://api.minimax.cn
     model: speech-2.8-hd
-    voices: [audiobook_male_1, female-chengshu, presenter_male] # 系统音色，可在控制台试听后替换
-    price_cny_per_10k_chars: 3.5
+    voices: [presenter_male, audiobook_male_1, female-chengshu] # 男性主持人（Phase 0 满分）、男性有声书、成熟女性
+    price_cny_per_10k_chars: 3.5 # 按目录价折算的 M Plan 额度消耗
     max_concurrency: 2
   doubao_tts:
     adapter: doubao_tts
-    label: 豆包语音 2.0
+    label: 豆包语音 2.0（按量，未开通）
+    enabled: false # 豆包语音控制台的按量接口；Agent Plan 里的 doubao-seed-tts-2.0 官方还没公开调用方式
     key_env: DOUBAO_TTS_ACCESS_KEY
     app_id_env: DOUBAO_TTS_APP_ID
     base_url: https://openspeech.bytedance.com/api/v3/tts/unidirectional
     model: seed-tts-2.0 # 作为 X-Api-Resource-Id 发送；以控制台显示的资源 ID 为准
-    voices: [] # 从豆包语音控制台的音色列表复制 2–3 个音色 ID（speaker）
+    voices: [zh_male_yuanboxiaoshu_moon_bigtts] # 渊博小叔
     price_cny_per_10k_chars: 3.0
     max_concurrency: 2
 
-  # —— 302.AI 中转（/302/tts/generate；provider 是配音供应商，model 是它的型号）——
-  # 音色列表：`ai-video relay-models --tts doubao,minimaxi`
-  doubao_tts_302:
-    adapter: relay302_tts
-    label: 豆包语音（302）
-    key_env: RELAY_API_KEY
-    base_url_env: RELAY_BASE_URL
-    base_url: https://api.302.ai
-    provider: doubao
-    model: '' # 豆包不用选型号
-    voices:
-      - zh_male_jieshuonansheng_mars_bigtts # 磁性解说男声
-      - zh_female_gufengshaoyu_mars_bigtts # 古风少御
-      - zh_male_yuanboxiaoshu_moon_bigtts # 渊博小叔
-    price_cny_per_10k_chars: 3.0
-    max_concurrency: 2
-  minimax_tts_302:
-    adapter: relay302_tts
-    label: MiniMax 语音（302）
-    key_env: RELAY_API_KEY
-    base_url_env: RELAY_BASE_URL
-    base_url: https://api.302.ai
-    provider: minimaxi
-    model: speech-2.8-hd
-    voices: [audiobook_male_1, female-chengshu, presenter_male] # 男性有声书、成熟女性、男性主持人
-    price_cny_per_10k_chars: 3.5
-    max_concurrency: 2
-
-# LLM 盲评：OpenAI 兼容接口。model 留空或没有 key 的会跳过。
-llm:
-  deepseek:
-    label: DeepSeek
-    key_env: DEEPSEEK_API_KEY
-    base_url: https://api.deepseek.com
-    model: deepseek-v4-pro
-  qwen:
-    label: 通义千问
-    key_env: DASHSCOPE_API_KEY
-    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    model: qwen-max
-  kimi:
-    label: Kimi
-    key_env: MOONSHOT_API_KEY
-    base_url: https://api.moonshot.cn/v1
-    model: kimi-latest
-  doubao:
-    label: 豆包
-    key_env: ARK_API_KEY
-    base_url: https://ark.cn-beijing.volces.com/api/v3
-    model: '' # 填方舟控制台里豆包大模型的模型 ID
-
-  # —— 302.AI 中转（/v1；可用模型名：GET /v1/models）——
-  deepseek_302:
-    label: DeepSeek（302）
-    key_env: RELAY_API_KEY
-    base_url_env: RELAY_BASE_URL
-    base_url: https://api.302.ai
-    base_path: /v1
-    model: deepseek-v4-pro
-  qwen_302:
-    label: 通义千问（302）
-    key_env: RELAY_API_KEY
-    base_url_env: RELAY_BASE_URL
-    base_url: https://api.302.ai
-    base_path: /v1
-    model: qwen3.7-max
-  kimi_302:
-    label: Kimi（302）
-    key_env: RELAY_API_KEY
-    base_url_env: RELAY_BASE_URL
-    base_url: https://api.302.ai
-    base_path: /v1
-    model: kimi-k3 # kimi-latest 在 302 上已不可用
-  doubao_302:
-    label: 豆包（302）
-    key_env: RELAY_API_KEY
-    base_url_env: RELAY_BASE_URL
-    base_url: https://api.302.ai
-    base_path: /v1
-    model: doubao-seed-2-1-pro-260628
-
-  # 手工撰写：不调用接口，由 Claude 在会话里直接写好，放进 data/bench/<run>/llm/<任务>.claude_manual.md
-  claude_manual:
-    label: Claude Opus 5.5（会话内撰写）
-    manual: true
+# 成片流水线（ai-video new / make）用哪些模型。依据 Phase 0 实测（reports/AI短视频全流程生成开发计划.md 6.1 节）和 v2 方案。
+routing:
+  image: seedream # 关键帧和角色参考图；封面或画面里要写字时可以临时换成 nano_banana
+  video:
+    default: seedance_25 # 默认 Seedance 2.5（2026-10-09 指定）；改回 2.0 就写 seedance（每秒约 500 AFP）
+    photoreal: h3 # 写实人脸镜头（Seedance 拒收真人脸），也是 Seedance 拒绝时的自动兜底
+    draft: seedance_mini # --draft 草稿模式：480p 先出一版看节奏
+  tts:
+    provider: minimax_tts # 先用 MiniMax；Gemini Key 修好后可改回 gemini_tts（voice 改成 Charon 等，先试听：
+    voice: presenter_male # ai-video bench tts --run voices --providers gemini_tts,minimax_tts）
 
 bench:
-  keyframe_provider: [seedream, seedream_302] # 视频统一用这里第一个有图的关键帧，保证各家起点一致
+  keyframe_provider: [seedream] # 视频统一用这里第一个有图的关键帧，保证各家起点一致
   poll_seconds: 10
   timeout_minutes: 30

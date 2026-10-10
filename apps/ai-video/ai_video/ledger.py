@@ -1,4 +1,6 @@
-"""Append-only cost ledger (JSON lines). Costs are estimates from the unit prices in providers.yaml."""
+"""Append-only cost ledger (JSON lines). Every record carries `cny`; records billed through a credit
+plan (Ark Agent Plan) also carry `plan` and `afp`. Costs are estimates unless a provider reported
+its actual usage."""
 import json
 import threading
 import time
@@ -18,11 +20,26 @@ class Ledger:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def entries(self) -> list[dict]:
+        """All records; a damaged line (e.g. a crash mid-write) is skipped rather than blocking the
+        quota check."""
         try:
             lines = self.path.read_text(encoding="utf-8").splitlines()
         except OSError:
             return []
-        return [json.loads(line) for line in lines if line.strip()]
+        out = []
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                continue
+        return out
 
     def total(self, run: str | None = None) -> float:
         return sum(e.get("cny", 0.0) for e in self.entries() if run is None or e.get("run") == run)
+
+    def afp(self, plan: str, since: float = 0.0) -> float:
+        """Plan credits recorded for `plan` since a Unix time."""
+        return sum(float(e.get("afp") or 0) for e in self.entries()
+                   if e.get("plan") == plan and e.get("ts", 0) >= since)

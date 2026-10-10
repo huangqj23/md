@@ -29,7 +29,7 @@
 
 `apps/ai-daily` 是 Python 项目（AI 早报流水线，见其 README），不在 pnpm workspace 内，也不参与 ESLint；浏览器扩展的「AI 早报」面板通过 Native Messaging 调用它（见 [docs/ai-daily.md](./docs/ai-daily.md)）。测试：`apps/ai-daily/.venv/Scripts/python -m pytest`。
 
-`apps/ai-video` 也是 Python 项目（AI 短视频流水线，目前是 Phase 0 模型对比测试，见其 README），同样不在 pnpm workspace 内。测试：`apps/ai-video/.venv/Scripts/python -m pytest`。
+`apps/ai-video` 也是 Python 项目（AI 短视频流水线：剧本由 Claude 用 `short-video` skill 在对话里写成 JSON，`ai-video new --script` 导入后出片；`ai-video bench` 模型对比测试；图像 / 视频 / 配音走方舟 Agent Plan、MiniMax M Plan、Gemini API，见其 README），同样不在 pnpm workspace 内，流水线不调用任何文本模型 API。测试：`apps/ai-video/.venv/Scripts/python -m pytest`。
 
 ## 常用命令
 
@@ -163,10 +163,11 @@ Reusable workflows live in [`.agents/skills/`](./.agents/skills/) (canonical). C
 .claude/skills/<name> → ../../.agents/skills/<name>
 ```
 
-| Skill        | When to use                                                                           |
-| ------------ | ------------------------------------------------------------------------------------- |
-| `git-commit` | Commit changes with Conventional Commits (`/git-commit` or "commit my changes")       |
-| `create-pr`  | Create a GitHub pull request (`/create-pr` or "open a PR")                            |
-| `wechat-svg` | WeChat SVG whitelist, bubbling-group interaction, paste compatibility (`/wechat-svg`) |
+| Skill         | When to use                                                                                    |
+| ------------- | ---------------------------------------------------------------------------------------------- |
+| `git-commit`  | Commit changes with Conventional Commits (`/git-commit` or "commit my changes")                |
+| `create-pr`   | Create a GitHub pull request (`/create-pr` or "open a PR")                                     |
+| `wechat-svg`  | WeChat SVG whitelist, bubbling-group interaction, paste compatibility (`/wechat-svg`)          |
+| `short-video` | Douyin short video: topic cards → script JSON → `ai-video` pipeline (`/short-video 立冬 古诗`) |
 
 Invoke manually: `/skill-name` in Cursor or Claude Code; OpenCode uses the `skill` tool.

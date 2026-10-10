@@ -15,7 +15,6 @@ def _rel(bench: Bench, path: Path) -> str:
 
 def _labels(bench: Bench) -> dict[str, str]:
     labels = {pid: p.label for kind in bench.providers.values() for pid, p in kind.items()}
-    labels.update({pid: c.get("label", pid) for pid, c in bench.llm_cfg.items()})
     labels["source"] = "原画"
     return labels
 
@@ -96,21 +95,8 @@ def gather(bench: Bench) -> dict:
                                   "latency_s": st.get("latency_s")})
         speech.append({"id": sc.id, "title": sc.title, "text": sc.text, "items": items})
 
-    llm = []
-    for task in bench.llm_tasks:
-        items = []
-        for pid in bench.llm_cfg:
-            f = bench.llm_file(task.id, pid)
-            st = bench.read_state("llm", f"{task.id}.{pid}")
-            if f.exists() or st:
-                items.append({"key": f"llm|{task.id}|{pid}", "provider": pid,
-                              "text": f.read_text(encoding="utf-8") if f.exists() else "",
-                              "state": "done" if f.exists() else st.get("state"), "message": st.get("message", ""),
-                              "latency_s": st.get("latency_s"), "json_ok": st.get("json_ok")})
-        llm.append({"id": task.id, "title": task.title, "prompt": task.prompt, "json": task.json, "items": items})
-
     return {"run": bench.run_name, "generated_at": time.strftime("%Y-%m-%d %H:%M"), "labels": _labels(bench),
-            "spent_cny": round(bench.ledger.total(bench.run_name), 2), "cases": cases, "speech": speech, "llm": llm}
+            "spent_cny": round(bench.ledger.total(bench.run_name), 2), "cases": cases, "speech": speech}
 
 
 def write_report(bench: Bench) -> Path:

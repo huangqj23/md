@@ -8,7 +8,7 @@ import re
 
 _REJECT_PATTERNS = re.compile(
     r"sensitive|\brisk|polic(y|ies)|moderat|deepfake|real[ _-]?(person|human)|\bfaces?\b|portrait"
-    r"|敏感|违规|审核|人脸|肖像|\b1026\b|\b1301\b",
+    r"|safety|prohibited|敏感|违规|审核|人脸|肖像|\b1026\b|\b1301\b",
     re.IGNORECASE,
 )
 
@@ -19,6 +19,12 @@ class ProviderError(Exception):
 
 class Rejected(ProviderError):
     """Content moderation refused the input or the output."""
+
+
+class Unconfirmed(ProviderError):
+    """A billed request failed after it may have reached the server (connection lost after sending,
+    or a 5xx): the provider may have done the work and charged for it, so it must not be resent
+    automatically, and the cost is recorded as unconfirmed."""
 
 
 def classify(code, message) -> type[ProviderError]:

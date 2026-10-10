@@ -1,4 +1,4 @@
-"""Bench cases (bench/cases.yaml): video cases, speech samples and LLM writing tasks."""
+"""Bench cases (bench/cases.yaml): video cases and speech samples."""
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -54,14 +54,7 @@ class SpeechCase:
     title: str
     text: str
     speed: float = 1.0
-
-
-@dataclass
-class LLMTask:
-    id: str
-    title: str
-    prompt: str
-    json: bool = False
+    style: str = ""              # delivery in words, for TTS models steered by prompts
 
 
 def _case(raw: dict) -> Case:
@@ -87,11 +80,10 @@ def _case(raw: dict) -> Case:
     )
 
 
-def load_cases(path: Path) -> tuple[list[Case], list[SpeechCase], list[LLMTask]]:
+def load_cases(path: Path) -> tuple[list[Case], list[SpeechCase]]:
     raw = load_yaml(path)
     cases = [_case(c) for c in raw.get("cases") or []]
-    speech = [SpeechCase(s["id"], s.get("title", s["id"]), s["text"].strip(), float(s.get("speed", 1.0)))
+    speech = [SpeechCase(s["id"], s.get("title", s["id"]), s["text"].strip(), float(s.get("speed", 1.0)),
+                         str(s.get("style") or "").strip())
               for s in raw.get("speech") or []]
-    tasks = [LLMTask(t["id"], t.get("title", t["id"]), t["prompt"].strip(), bool(t.get("json")))
-             for t in raw.get("llm") or []]
-    return cases, speech, tasks
+    return cases, speech

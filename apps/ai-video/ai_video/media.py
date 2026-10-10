@@ -8,8 +8,8 @@ from pathlib import Path
 from PIL import Image
 
 # Keyframes are stored at up to 2560 px; uploads are capped at 1920 px (enough for 1080p video) and
-# ~600 KB. Detailed paintings at 2560 px came to 1.6 MB each, and two of them as base64 made relay
-# gateways time out (HTTP 524) before the request was even accepted.
+# ~600 KB, which keeps base64 request bodies small: detailed paintings at 2560 px came to 1.6 MB each,
+# and two of them as base64 made gateways time out (HTTP 524) before the request was accepted.
 MAX_SIDE = 2560
 UPLOAD_SIDE = 1920
 UPLOAD_BYTES = 600_000
@@ -70,6 +70,28 @@ def crop_windows(src: Path, dsts: list[Path], ratio: str, start: float = 0.5, st
                 out.save(dst, "JPEG", quality=95)
     finally:
         Image.MAX_IMAGE_PIXELS = old_limit
+
+
+def to_mp3(audio: bytes) -> bytes:
+    """Encode audio bytes in any format ffmpeg reads (e.g. WAV from a TTS API) as mono 128 kbps MP3."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("找不到 ffmpeg，无法把配音转成 mp3")
+    proc = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-ac", "1",
+                           "-b:a", "128k", "-f", "mp3", "pipe:1"], input=audio, capture_output=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"配音转码失败：{proc.stderr.decode('utf-8', 'replace')[-300:]}")
+    return proc.stdout
+
+
+def probe_duration(path: Path) -> float:
+    """Media duration in seconds (ffprobe)."""
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        raise RuntimeError("找不到 ffprobe")
+    out = subprocess.run([ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+                         check=True, capture_output=True, text=True).stdout.strip()
+    return float(out)
 
 
 def concat(clips: list[Path], out: Path) -> None:

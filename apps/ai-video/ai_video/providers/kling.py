@@ -1,8 +1,7 @@
 """Kling open platform: text2video / image2video tasks. image2video takes `image_tail` for
 first+last frame generation.
 
-Direct calls are authorised with a JWT signed from the AccessKey/SecretKey pair; through a relay
-(no `secret_env` configured) the relay's own key is sent as a plain bearer token."""
+Calls are authorised with a JWT signed from the AccessKey/SecretKey pair."""
 import base64
 import hashlib
 import hmac
@@ -38,13 +37,11 @@ def jwt_token(access_key: str, secret_key: str, now: float | None = None) -> str
 class KlingVideo(VideoProvider):
     def missing(self) -> list[str]:
         out = super().missing()
-        if self.cfg.get("secret_env") and not self.env("secret_env"):
-            out.append(f".env 里没有 {self.cfg['secret_env']}")
+        if not self.env("secret_env"):
+            out.append(f".env 里没有 {self.cfg.get('secret_env') or 'secret_env 指定的 SecretKey'}")
         return out
 
     def headers(self) -> dict:
-        if not self.cfg.get("secret_env"):
-            return {"Authorization": f"Bearer {self.api_key}"}
         return {"Authorization": f"Bearer {jwt_token(self.api_key, self.env('secret_env'))}"}
 
     def supports(self, req: VideoRequest) -> str | None:
@@ -75,7 +72,8 @@ class KlingVideo(VideoProvider):
 
     def submit(self, http: httpx.Client, req: VideoRequest) -> str:
         endpoint, body = self.build(req)
-        data = call(http, "POST", f"{self.base_url}/v1/videos/{endpoint}", json=body, headers=self.headers()).json()
+        data = call(http, "POST", f"{self.base_url}/v1/videos/{endpoint}", json=body, headers=self.headers(),
+                    billed=True).json()
         if data.get("code") != 0:
             raise classify(data.get("code"), data.get("message"))(f"{data.get('code')}: {data.get('message')}")
         # The query path depends on the endpoint, so it travels inside the task id.
