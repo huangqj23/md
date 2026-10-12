@@ -62,10 +62,11 @@ collect（官方博客 / 国内大模型公司的官方渠道 / 海外媒体 / n
 
 ## 文末页脚
 
-正文最后是“图片版权归原作者，出处见图注。”、关注**Hollis的视觉大模型实战**的宣传语（`render.footer()`，模板和 `materials.md` 都用它）和公众号二维码名片。二维码引用 vault 品牌目录里的 `_brand/hollis23/wechat-qrcode_nowm_wxonly.png`（相对正文写成 `../../_brand/hollis23/…`）：
+正文最后是“图片版权归原作者，出处见图注。”、关注**Hollis的视觉大模型实战**的宣传语（`render.footer()`，模板和 `materials.md` 都用它）和公众号关注卡片（左边公众号名、右边二维码）。卡片是 vault 品牌目录里的 `_brand/hollis23/wechat-follow-card_nowm_wxonly.png`，由那里的 `follow_card.py` 生成：
 
-- 文件不在时，`ai-daily publish` 的检查会报“图片不存在”，内嵌版不会带坏链接；
-- `_nowm`：内嵌时不加水印；`_wxonly`：内嵌时带 `data-publish-only="wechat"`，md 多平台同步时只发公众号，其他平台去掉二维码、保留文字。
+- 写稿时照抄成相对路径 `../../_brand/hollis23/…`；`finalize`（以及 `run`）把这一行换成内嵌的图（WebP base64，带 `data-publish-only="wechat"`），按图注认，旧稿里指向二维码名片的那行也会换。正文是直接导进 md 发布的：写路径时，品牌目录不在导入选的文件夹里，图床又会把文件名换掉，公众号文末就缺了二维码；
+- 卡片文件不在时不内嵌，`ai-daily publish` 的检查会报“图片不存在”，内嵌版不会带坏链接；
+- `_nowm`：内嵌时不加水印；`_wxonly`：md 多平台同步时只发公众号，其他平台去掉卡片、保留文字。
 
 ## 安装
 

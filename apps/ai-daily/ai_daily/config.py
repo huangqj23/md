@@ -54,9 +54,9 @@ class Settings:
         return self.vault / "_brand" / "hollis23"
 
     @property
-    def qr_code(self) -> Path:
-        """文末的公众号二维码名片；文件名带 _wxonly，多平台同步时只发公众号。"""
-        return self.brand_dir / "wechat-qrcode_nowm_wxonly.png"
+    def follow_card(self) -> Path:
+        """文末的公众号关注卡片（品牌目录的 follow_card.py 生成），finalize 内嵌进正文；只发公众号。"""
+        return self.brand_dir / "wechat-follow-card_nowm_wxonly.png"
 
     @property
     def inbox(self) -> Path:

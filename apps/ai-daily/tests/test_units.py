@@ -227,5 +227,5 @@ def test_display_links_drop_tracking_params_but_keep_share_codes():
 def test_relative_ref_points_from_the_article_to_the_brand_folder(tmp_path):
     from ai_daily.render import relative_ref
     vault = tmp_path / "vault"
-    qr = vault / "_brand" / "hollis23" / "wechat-qrcode_nowm_wxonly.png"
-    assert relative_ref(qr, vault / "AI_Daily" / "2026-10") == "../../_brand/hollis23/wechat-qrcode_nowm_wxonly.png"
+    card = vault / "_brand" / "hollis23" / "wechat-follow-card_nowm_wxonly.png"
+    assert relative_ref(card, vault / "AI_Daily" / "2026-10") == "../../_brand/hollis23/wechat-follow-card_nowm_wxonly.png"

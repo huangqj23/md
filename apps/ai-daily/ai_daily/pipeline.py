@@ -193,14 +193,14 @@ def run(settings: Settings, sources: dict, *, day: date, now: datetime, http, ll
             attach_images(http, layout, out_dir, day, cfg.get("max_images", 16))
             log.info("配图：%d / %d 条有图", sum(1 for e in layout.written if e.image_path), len(layout.written))
 
-        article_md = render.render_article(layout, editor, qr_code=render.relative_ref(settings.qr_code, out_dir))
+        article_md = render.render_article(layout, editor, card=render.relative_ref(settings.follow_card, out_dir))
         usage = "未使用（--no-llm）" if llm is None else llm.usage_summary()
         review_md = render.render_review(day, p["stem"], layout, editor, article_md, stats=stats,
                                          n_items=len(fresh), n_candidates=len(candidates), n_events=len(events),
                                          llm_usage=usage or "0",
                                          generated=now.astimezone().isoformat(timespec="seconds"))
         out_dir.mkdir(parents=True, exist_ok=True)
-        p["article"].write_text(article_md, encoding="utf-8")
+        p["article"].write_text(render.embed_follow_card(article_md, settings.follow_card), encoding="utf-8")
         p["review"].write_text(review_md, encoding="utf-8")
         store.mark_drafted(day, *publish.article_refs(article_md))
         spec = render.cover_spec(day, render.issue_number(settings.daily_dir, day), layout, editor)

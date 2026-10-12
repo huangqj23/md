@@ -148,6 +148,39 @@ describe(`csdn`, () => {
     expect(result.kind === `done` && result.report.method).toBe(`codemirror`)
   })
 
+  it(`leaves the 预览 tab, which hides the editor and makes it read-only, for 比对`, async () => {
+    document.body.innerHTML = `
+      <div class="article-bar__title"><input placeholder="请输入文章标题（5~100个字）"></div>
+      <nav>
+        <button class="nav-tab-btn">Markdown</button>
+        <button class="nav-tab-btn">比对</button>
+        <button class="nav-tab-btn nav-tab-btn--active">预览</button>
+      </nav>
+      <pre class="editor__inner markdown-highlighting" contenteditable="false"></pre>
+      <button>保存草稿</button>`
+    const editor = document.querySelector<HTMLElement>(`.editor__inner`)!
+    const [markdownTab, splitTab] = Array.from(document.querySelectorAll(`nav button`))
+    const onMarkdownTab = vi.fn()
+    markdownTab.addEventListener(`click`, onMarkdownTab)
+    // CSDN makes the editor editable once its store has the new layout.
+    const onSplitTab = vi.fn(() => setTimeout(() => editor.setAttribute(`contenteditable`, `true`), 300))
+    splitTab.addEventListener(`click`, onSplitTab)
+
+    const result = await runStep(csdn, `fill`)
+
+    expect(onSplitTab).toHaveBeenCalledOnce()
+    expect(onMarkdownTab).not.toHaveBeenCalled()
+    expect(result.kind).toBe(`done`)
+    expect(editor.textContent).toBe(article.markdown)
+  })
+
+  it(`reports an editor that stays read-only as a fill failure, not a missing editor`, async () => {
+    document.body.innerHTML = `<input placeholder="文章标题"><pre class="editor__inner" contenteditable="false"></pre>`
+    const result = await runStep(csdn, `fill`)
+    expect(result).toMatchObject({ kind: `error`, code: `fill-failed` })
+    expect(result.kind === `error` && result.message).toContain(`read-only`)
+  })
+
   it(`fails with editor-not-found when the page has no editor`, async () => {
     document.body.innerHTML = `<p>nothing here</p>`
     expect(await runStep(csdn, `fill`)).toMatchObject({ kind: `error`, code: `editor-not-found` })

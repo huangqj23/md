@@ -17,7 +17,8 @@ from conftest import NOW, png_bytes
 from test_pipeline import DAY, SOURCES
 
 CAND = re.compile(r"^\[(E\d+)\] (.+)$", re.M)
-QR = "../../_brand/hollis23/wechat-qrcode_nowm_wxonly.png"
+CARD = "../../_brand/hollis23/wechat-follow-card_nowm_wxonly.png"
+OLD_QR = "../../_brand/hollis23/wechat-qrcode_nowm_wxonly.png"     # 2026-10-12 以前的稿：文末是二维码名片
 IMAGE_LINE = re.compile(r"!\[<标题>\]\((.+?)\)　第一段末尾加：（(.+)）$")
 
 
@@ -25,8 +26,8 @@ IMAGE_LINE = re.compile(r"!\[<标题>\]\((.+?)\)　第一段末尾加：（(.+)�
 def settings(tmp_path):
     s = Settings(vault=tmp_path / "vault", brand_python="python", data_dir=tmp_path / "data", llm_base_url="",
                  llm_api_key="", llm_model_triage="", llm_model_write="", llm_extra_body={})
-    s.qr_code.parent.mkdir(parents=True)
-    s.qr_code.write_bytes(png_bytes(400, 400))
+    s.follow_card.parent.mkdir(parents=True)
+    s.follow_card.write_bytes(png_bytes(1080, 480))
     return s
 
 
@@ -61,7 +62,7 @@ def _article(mat: str) -> str:
     for i in (1, 2, 3):
         lines += [f"### {i}. 条目{i}", ""] + item(f"n{i}", f"条目{i}") + ["- **工程师视角**：恭喜团队，值得一试。", ""]
     lines += ["## 快讯", ""] + [f"- **快讯{i}**：一句话。（{b[f'b{i}']['链接']}）" for i in (1, 2)]
-    return "\n".join(lines + ["", render.footer(QR), ""])
+    return "\n".join(lines + ["", render.footer(CARD), ""])
 
 
 def test_prepare_lists_candidates_without_calling_a_model(http, settings):
@@ -99,7 +100,7 @@ def test_claude_flow_end_to_end(http, settings):
     assert head["来源行"].startswith("`官方` · [OpenAI 官方博客](")
     assert IMAGE_LINE.match(head["配图行"]).groups() == ("images/2026-09-30_h_nowm.png", "图源：OpenAI 官方博客")
     assert "near-Astra intelligence for a fifth of the price" in mat
-    assert mat.rstrip().endswith(render.footer(QR))
+    assert mat.rstrip().endswith(render.footer(CARD))
 
     article = render.paths(settings.daily_dir / "2026-09", DAY)["article"]
     article.write_text(_article(mat), encoding="utf-8")
@@ -108,6 +109,9 @@ def test_claude_flow_end_to_end(http, settings):
     prepared.plan.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
     f = stages.finalize(settings, SOURCES, day=DAY)
     assert f.problems == [] and f.warnings == []
+    # 文末关注卡片已内嵌：md 导入正文时不用再找品牌目录里的文件，data-publish-only 让它只发公众号
+    text = article.read_text(encoding="utf-8")
+    assert text.rstrip().endswith('data-publish-only="wechat" />') and CARD not in text
 
     review = f.review.read_text(encoding="utf-8")
     assert "- [x] 选题、写稿、核对：Claude 已完成" in review
@@ -196,6 +200,34 @@ def test_black_video_frames_are_not_used_as_images(tmp_path):
 def test_article_template_uses_the_shared_badge_and_footer():
     ev = Event(title="t", track="llm", score=1, label="官方", items=[
         Item("a", "A 博客", "official", "t", "https://a.com/x"), Item("b", "B 媒体", "media", "t", "https://b.com/y")])
-    md = render.render_article(Layout(ev, [], [], []), {"titles": ["AI 早报"], "highlights": []}, qr_code="qr.png")
+    md = render.render_article(Layout(ev, [], [], []), {"titles": ["AI 早报"], "highlights": []}, card="card.png")
     assert render.badge(ev) in md.splitlines()
-    assert md.rstrip().endswith(render.footer("qr.png"))
+    assert md.rstrip().endswith(render.footer("card.png"))
+
+
+def test_follow_card_replaces_the_footer_image_by_alt(tmp_path):
+    card = tmp_path / "card.png"
+    card.write_bytes(png_bytes(1080, 480))
+    old = f"正文\n\n{render.footer(OLD_QR)}\n"
+    md = render.embed_follow_card(old, card)
+    tag = render.FOLLOW_CARD_HTML.search(md).group(0)
+    assert tag.startswith(f'<img alt="{render.FOLLOW_ALT}" src="data:image/webp;base64,')
+    assert tag.endswith('style="max-width:100%;" data-publish-only="wechat" />')          # 写法同 watermark.py
+    assert OLD_QR not in md and render.has_footer(md) and render.has_footer(old)
+    assert render.embed_follow_card(md, card) == md                                          # 再跑一次不变
+    assert render.embed_follow_card(old, tmp_path / "missing.png") == old                   # 卡片不在：原样留着
+    assert not render.has_footer(f"正文\n\n{render.footer(None)}\n")                          # 只有文字、没有卡片
+
+
+def test_finalize_embeds_the_card_into_an_old_crlf_draft(http, settings):
+    prepared = stages.prepare(settings, SOURCES, day=DAY, now=NOW, http=http)
+    _plan(prepared)
+    mat = stages.materials(settings, SOURCES, day=DAY, http=http).path.read_text(encoding="utf-8")
+    article = render.paths(settings.daily_dir / "2026-09", DAY)["article"]
+    draft = _article(mat).replace(CARD, OLD_QR)
+    article.write_bytes(draft.replace("\n", "\r\n").encode("utf-8"))
+    stages.finalize(settings, SOURCES, day=DAY)
+    raw = article.read_bytes().decode("utf-8")
+    assert raw.count("\r\n") == draft.count("\n") and "\n" not in raw.replace("\r\n", "")   # 换行符照旧
+    assert OLD_QR not in raw and render.FOLLOW_CARD_HTML.search(raw)
+    assert not stages.embed_follow_card(article, settings.follow_card)                      # 已内嵌：不再改写

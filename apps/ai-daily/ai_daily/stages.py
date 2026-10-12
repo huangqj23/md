@@ -342,7 +342,7 @@ def materials_md(day: date, layout: triage.Layout, slots: dict, state: dict, set
     lines += ["# 快讯", ""]
     for i, ev in enumerate(layout.briefs, 1):
         lines += _block(day, f"b{i}", slots[f"b{i}"], ev, BRIEF_CHARS, brief=True)
-    lines += ["# 文末（原样复制到正文最后）", "", render.footer(render.relative_ref(settings.qr_code, out_dir)), ""]
+    lines += ["# 文末（原样复制到正文最后）", "", render.footer(render.relative_ref(settings.follow_card, out_dir)), ""]
     return "\n".join(lines)
 
 
@@ -399,7 +399,7 @@ def _sections(text: str) -> list[tuple[str, str, bool]]:
     return out
 
 
-def check_article(article: Path, text: str, layout: triage.Layout, qr: str) -> tuple[list[str], list[str]]:
+def check_article(article: Path, text: str, layout: triage.Layout) -> tuple[list[str], list[str]]:
     """(必须改的, 提醒看一眼的)。"""
     problems, warnings = publish.check(article), []
     if not re.search(r"^## 头条｜", text, re.M):
@@ -410,8 +410,8 @@ def check_article(article: Path, text: str, layout: triage.Layout, qr: str) -> t
         problems.append(f"要闻 {n} 条，plan.json 里是 {len(layout.main)} 条")
     if (n := len(_briefs(text))) != len(layout.briefs):
         problems.append(f"快讯 {n} 条，plan.json 里是 {len(layout.briefs)} 条")
-    if render.footer(qr) not in text:
-        problems.append("文末的版权说明、关注语或二维码不完整：从 materials.md 末尾原样复制")
+    if not render.has_footer(text):
+        problems.append("文末的版权说明、关注语或关注卡片不完整：从 materials.md 末尾原样复制")
     for slot, ev in _image_slots(layout):
         if ev.image_path and f"]({ev.image_path})" not in text:
             problems.append(f"{slot} 下好的配图没用上：{ev.image_path}")
@@ -438,6 +438,18 @@ def check_article(article: Path, text: str, layout: triage.Layout, qr: str) -> t
     return problems, warnings
 
 
+def embed_follow_card(article: Path, card: Path) -> bool:
+    """正文文末的关注卡片内嵌进去（见 render.embed_follow_card），保留原来的换行符；有改动返回 True。"""
+    with article.open(encoding="utf-8", newline="") as f:
+        raw = f.read()
+    new = render.embed_follow_card(raw, card)
+    if new == raw:
+        return False
+    with article.open("w", encoding="utf-8", newline="") as f:
+        f.write(new)
+    return True
+
+
 def finalize(settings: Settings, sources: dict, *, day: date) -> Finalized:
     work = work_dir(settings, day)
     state = _load_state(work / STATE)
@@ -446,6 +458,7 @@ def finalize(settings: Settings, sources: dict, *, day: date) -> Finalized:
     p = render.paths(out_dir, day)
     if not p["article"].is_file():
         raise PlanError(f"还没有正文 {p['article']}：照 materials.md 写好再运行")
+    embed_follow_card(p["article"], settings.follow_card)
     text = p["article"].read_text(encoding="utf-8")
     layout, slots, events = build(plan, state)
     for slot, ev in events.items():
@@ -456,7 +469,7 @@ def finalize(settings: Settings, sources: dict, *, day: date) -> Finalized:
         img = state["slots"].get(slot) or {}
         if img.get("event") == slots[slot]:
             ev.image_path, ev.image_credit = img.get("image_path"), img.get("image_credit") or ""
-    problems, warnings = check_article(p["article"], text, layout, render.relative_ref(settings.qr_code, out_dir))
+    problems, warnings = check_article(p["article"], text, layout)
 
     m = publish.H1.search(text)
     titles = [str(t) for t in plan.get("titles") or [] if t]

@@ -15,6 +15,9 @@ from PIL import Image
 from .render import CREDIT_LINE
 
 MAX_W, QUALITY = 1000, 72
+# 正文里已经内嵌的图（finalize 写进去的文末关注卡片）：原样放进预览
+EMBEDDED_IMG = re.compile(r'^<img\b[^>]*\bsrc="(data:image/[^"]+)"[^>]*>$')
+ALT = re.compile(r'\balt="([^"]*)"')
 
 
 def data_uri(path: Path, max_w: int = MAX_W, quality: int = QUALITY) -> tuple[str, int, int]:
@@ -131,9 +134,15 @@ def render_body(md: str, base: Path) -> tuple[str, dict]:
         if first.startswith("`"):
             html_parts.append(meta_line(" ".join(b)))
             continue
+        m = EMBEDDED_IMG.match(first)
+        if m:
+            alt = ALT.search(first)
+            info["images"] += 1
+            html_parts.append(f'<figure><img src="{m.group(1)}" alt="{alt.group(1) if alt else ""}" loading="lazy"></figure>')
+            continue
         m = re.match(r"^!\[([^\]]*)\]\(([^)\s]+)\)$", first)
         if m and not (base / m.group(2)).is_file():
-            # 例如文末二维码还没放进品牌目录：预览照出，标出缺的图（发布检查会拦）
+            # 例如文末关注卡片还没放进品牌目录：预览照出，标出缺的图（发布检查会拦）
             html_parts.append(f"<p>（图片不存在：{html.escape(m.group(2))}）</p>")
             continue
         if m:

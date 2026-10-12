@@ -11,7 +11,7 @@ from ai_daily.models import Event, Item
 from ai_daily.pipeline import dedupe, run, swap_thin_events
 from ai_daily.store import Store
 from ai_daily.triage import Layout, select
-from conftest import NOW, ScriptedLLM
+from conftest import NOW, ScriptedLLM, png_bytes
 
 DAY = date(2026, 9, 30)
 SOURCES = {
@@ -107,8 +107,8 @@ def test_full_run_with_llm(http, settings):
     assert re.search(r"!\[中文标题\]\(images/2026-09-30_h_nowm\.png\)\n\n[^\n]+（图源：OpenAI 官方博客）\n", md)
     assert "<p style=" not in md
     assert "关注**Hollis的视觉大模型实战**：" in md                     # 文末公众号名加粗（二维码名片上的写法）
-    # 文末二维码引用 vault 的品牌目录，相对正文写；文件名带 _wxonly，多平台同步时只发公众号
-    assert md.rstrip().endswith("![微信扫码关注 Hollis的视觉大模型实战](../../_brand/hollis23/wechat-qrcode_nowm_wxonly.png)")
+    # 文末关注卡片引用 vault 的品牌目录，相对正文写（卡片在时直接内嵌）；文件名带 _wxonly，只发公众号
+    assert md.rstrip().endswith("![微信扫码关注 Hollis的视觉大模型实战](../../_brand/hollis23/wechat-follow-card_nowm_wxonly.png)")
     assert (result.article.parent / "images" / "2026-09-30_h_nowm.png").is_file()
 
     review = result.review.read_text(encoding="utf-8")
@@ -156,10 +156,10 @@ def test_publish_check_then_mark_published(http, settings):
     md = result.article.read_text(encoding="utf-8").replace("【我的看法：待写】", "我认为值得一试。")
     md = re.sub(r"【待核对：[^】]*】\n?", "", md)
     result.article.write_text(md, encoding="utf-8")
-    # 文末二维码放在 vault 的品牌目录里；还没放进去时，发布检查会拦下来
-    assert publish.check(result.article) == ["图片不存在：../../_brand/hollis23/wechat-qrcode_nowm_wxonly.png"]
-    settings.qr_code.parent.mkdir(parents=True, exist_ok=True)
-    settings.qr_code.write_bytes(b"png")
+    # 文末关注卡片放在 vault 的品牌目录里；还没放进去时，发布检查会拦下来
+    assert publish.check(result.article) == ["图片不存在：../../_brand/hollis23/wechat-follow-card_nowm_wxonly.png"]
+    settings.follow_card.parent.mkdir(parents=True, exist_ok=True)
+    settings.follow_card.write_bytes(b"png")
     assert publish.check(result.article) == []
 
     store = Store(settings.db_path)
@@ -248,6 +248,21 @@ def test_issue_number_counts_earlier_days(tmp_path):
         (tmp_path / "2026-09" / f"{d}_AI日报.md").write_text("x", encoding="utf-8")
     (tmp_path / "2026-09" / "2026-09-29_AI日报_内嵌图片版.md").write_text("x", encoding="utf-8")
     assert render.issue_number(tmp_path, date(2026, 9, 30)) == 3
+
+
+def test_follow_card_is_embedded_and_previewed_as_an_image(http, settings, tmp_path):
+    from ai_daily import preview
+    settings.follow_card.parent.mkdir(parents=True, exist_ok=True)
+    settings.follow_card.write_bytes(png_bytes(1080, 480))
+    result = run(settings, SOURCES, day=DAY, now=NOW, http=http, llm=scripted(), cover=False)
+    md = result.article.read_text(encoding="utf-8")
+    assert md.rstrip().endswith('data-publish-only="wechat" />') and "wechat-follow-card" not in md
+    assert not any("图片不存在" in p for p in publish.check(result.article))   # 内嵌的卡片不用找文件
+    out = tmp_path / "preview.html"
+    preview.build(result.article, out)
+    page = out.read_text(encoding="utf-8")
+    assert f'<figure><img src="data:image/webp;base64,' in page and f'alt="{render.FOLLOW_ALT}"' in page
+    assert "&lt;img" not in page                                               # 不会当成文字显示
 
 
 def test_preview_page_embeds_images_and_shows_draft_status(http, settings, tmp_path):

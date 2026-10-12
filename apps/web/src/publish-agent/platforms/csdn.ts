@@ -1,9 +1,18 @@
 // Markdown-editor flow follows doocs/cose (Apache-2.0).
+// The body editor is StackEdit's cledit on `pre.editor__inner`; it watches its own DOM, so writing the
+// text there reaches CSDN's store. The editor has three view tabs: Markdown, 比对 (the default) and 预览.
+// 预览 hides the editor and sets it `contenteditable="false"`, and CSDN keeps the last tab in localStorage
+// (`data/layoutSettings`), so one click on 预览 broke every later sync. The agent switches back to 比对
+// first, as a user would. Read from the editor.csdn.net/md bundle (2026-10-12).
 import type { AgentArticle, AgentResult } from '../protocol'
 import type { PlatformFiller } from '../result'
+import type { CodeMirrorLike } from './codemirror'
 import {
   clickButtonWhenReady,
   countTextChars,
+  describePage,
+  findButton,
+  isVisible,
   queryFirst,
   setFieldValue,
   sleep,
@@ -18,6 +27,24 @@ const EDITOR_SELECTORS = [
   `.editor__inner[contenteditable="true"]`,
   `[contenteditable="true"].markdown-highlighting`,
 ]
+/** The same editor while CSDN holds it read-only: the 预览 tab, a history version, its AI assistant answering. */
+const READ_ONLY_EDITOR_SELECTORS = [`.editor__inner`, `.markdown-highlighting`]
+/** View tabs that show the editor, CSDN's default first. */
+const EDITING_TABS = [`比对`, `Markdown`]
+
+function findEditor(): HTMLElement | CodeMirrorLike | null {
+  return queryFirst<HTMLElement>(EDITOR_SELECTORS) ?? getCodeMirror(document.querySelector(`.CodeMirror`))
+}
+
+/** Clicks an editing tab when the editor is on the page but hidden, i.e. the 预览 tab is open. */
+function leavePreview(): boolean {
+  const editor = queryFirst(READ_ONLY_EDITOR_SELECTORS)
+  if (!editor || isVisible(editor))
+    return false
+  const tab = EDITING_TABS.map(label => findButton(label)).find(Boolean)
+  tab?.click()
+  return Boolean(tab)
+}
 
 function setEditorMarkdown(editor: HTMLElement, markdown: string) {
   editor.focus()
@@ -33,9 +60,19 @@ async function fill(article: AgentArticle): Promise<AgentResult> {
   await sleep(800)
   const titleFilled = setFieldValue(titleInput, article.title)
 
-  const target = await waitFor(() => queryFirst<HTMLElement>(EDITOR_SELECTORS) ?? getCodeMirror(document.querySelector(`.CodeMirror`)))
-  if (!target)
-    return editorMissing(`CSDN Markdown body editor`)
+  let switchedTab = false
+  const target = await waitFor(() => {
+    const editor = findEditor()
+    if (!editor && !switchedTab)
+      switchedTab = leavePreview()
+    return editor
+  })
+  if (!target) {
+    if (!queryFirst(READ_ONLY_EDITOR_SELECTORS))
+      return editorMissing(`CSDN Markdown body editor`)
+    const tried = switchedTab ? `, even after switching to the 比对 tab` : ``
+    return fail(`fill-failed`, `CSDN Markdown editor stayed read-only${tried} (预览 tab, a history version, or its AI assistant answering) — ${describePage()}`)
+  }
 
   let method: string
   let bodyText: string

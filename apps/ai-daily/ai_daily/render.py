@@ -1,9 +1,13 @@
 """渲染：正文（发布用）、审稿清单与备选（不发布）、封面 JSON。"""
+import base64
+import io
 import json
 import os
 import re
 from datetime import date, datetime
 from pathlib import Path
+
+from PIL import Image
 
 from .models import TRACK_NAMES, TRACKS, Event
 from .templating import template
@@ -61,14 +65,46 @@ def badge(ev: Event) -> str:
 
 
 FOLLOW_LINE = "关注**Hollis的视觉大模型实战**：每天一份 AI 早报，只看一手来源；视觉与多模态大模型的论文精读和动手复现，也在这里。"
+FOLLOW_ALT = "微信扫码关注 Hollis的视觉大模型实战"
+# 文末关注卡片的两种写法：写稿时照抄的图片路径，finalize 内嵌之后的 <img>。按 alt 认，不认路径。
+FOLLOW_CARD_MD = re.compile(r"!\[" + re.escape(FOLLOW_ALT) + r"\]\([^)\s]+\)")
+FOLLOW_CARD_HTML = re.compile(r'<img alt="' + re.escape(FOLLOW_ALT) + r'" src="data:[^"]+"[^>]*>')
+MAX_EMBED_BYTES = 60 * 1024          # 同 watermark.py 的 MAX_EMBED_KB：单张内嵌图再大，md 里显示不出来
 
 
-def footer(qr_code: str | None) -> str:
-    """文末：版权说明、关注语（公众号名照二维码名片写）、二维码名片。"""
+def footer(card: str | None) -> str:
+    """文末：版权说明、关注语（公众号名照二维码名片写）、关注卡片（相对正文的路径，finalize 再内嵌）。"""
     parts = ["---", "图片版权归原作者，出处见图注。", FOLLOW_LINE]
-    if qr_code:
-        parts.append(f"![微信扫码关注 Hollis的视觉大模型实战]({qr_code})")
+    if card:
+        parts.append(f"![{FOLLOW_ALT}]({card})")
     return "\n\n".join(parts)
+
+
+def has_footer(text: str) -> bool:
+    """文末齐全：版权说明、关注语，加上关注卡片（还是路径，或已经内嵌）。"""
+    return footer(None) in text and bool(FOLLOW_CARD_MD.search(text) or FOLLOW_CARD_HTML.search(text))
+
+
+def card_tag(card: Path) -> str:
+    """关注卡片内嵌成 <img>，写法同 watermark.py：WebP（先试无损），带 data-publish-only，md 同步时只发公众号。"""
+    with Image.open(card) as im:
+        for options in ({"lossless": True}, {"quality": 90}, {"quality": 80}):
+            buf = io.BytesIO()
+            im.save(buf, "WEBP", method=6, **options)
+            if buf.tell() <= MAX_EMBED_BYTES:
+                break
+    data = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f'<img alt="{FOLLOW_ALT}" src="data:image/webp;base64,{data}" style="max-width:100%;" data-publish-only="wechat" />'
+
+
+def embed_follow_card(text: str, card: Path) -> str:
+    """文末的关注卡片换成内嵌的图。正文是导进 md 发布的：品牌目录不在导入时选的文件夹里，图找不到；
+    上传图床又会丢掉文件名里的 _wxonly，公众号文末就缺了二维码（用户 2026-10-12 遇到）。内嵌加
+    data-publish-only 两头都不怕。旧稿里指向二维码名片的那行也换成卡片；卡片文件不在时原样返回。"""
+    if not card.is_file():
+        return text
+    tag = card_tag(card)
+    return FOLLOW_CARD_HTML.sub(lambda _: tag, FOLLOW_CARD_MD.sub(lambda _: tag, text))
 
 
 def _tidy(md: str) -> str:
@@ -84,10 +120,10 @@ def relative_ref(target: Path, from_dir: Path) -> str:
         return target.as_posix()
 
 
-def render_article(layout: Layout, editor: dict, qr_code: str | None = None) -> str:
-    """头条 + 要闻（按分数平铺，不分栏）+ 快讯；qr_code 是文末二维码相对正文的路径。"""
+def render_article(layout: Layout, editor: dict, card: str | None = None) -> str:
+    """头条 + 要闻（按分数平铺，不分栏）+ 快讯；card 是文末关注卡片相对正文的路径。"""
     return _tidy(template("daily.md.j2", title=editor["titles"][0], highlights=editor["highlights"],
-                          footer=footer(qr_code), headline=layout.headline, main=layout.main, briefs=layout.briefs,
+                          footer=footer(card), headline=layout.headline, main=layout.main, briefs=layout.briefs,
                           badge_line=badge))
 
 
