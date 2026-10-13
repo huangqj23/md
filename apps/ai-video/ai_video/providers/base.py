@@ -12,25 +12,63 @@ from pathlib import Path
 
 import httpx
 
+from .. import media
 from ..errors import ProviderError, Unconfirmed, classify
 from ..net import call, error_from_response, make_client
+
+# Reference mode limits shared by Ark and MiniMax V2.
+REF_IMAGES_MAX = 9
+REF_AUDIO_MAX = 3
+REF_AUDIO_SECONDS = (2.0, 15.0)   # each clip; all clips together at most the upper bound
+REF_AUDIO_BYTES = 15_000_000
 
 
 @dataclass
 class VideoRequest:
     prompt: str
     duration: int = 5
-    ratio: str = "16:9"          # used for text-to-video; image-driven requests follow the image
+    ratio: str = "16:9"          # used for text-to-video and reference mode; frame-driven requests follow the image
     first_frame: Path | None = None
     last_frame: Path | None = None
     audio: bool = True
     seed: int | None = None
+    ref_images: list[Path] = field(default_factory=list)   # reference mode: character and scene images
+    ref_audio: list[Path] = field(default_factory=list)    # reference mode: voice samples (MP3 or WAV)
 
     @property
     def mode(self) -> str:
+        if self.ref_images or self.ref_audio:
+            return "r2v"
         if self.first_frame and self.last_frame:
             return "flf2v"
         return "i2v" if self.first_frame else "t2v"
+
+
+def reference_problem(req: VideoRequest) -> str | None:
+    """Why a reference-mode request would be refused, checked before anything is billed. Frames and
+    references never go in one request: image-to-video and reference-to-video are separate modes."""
+    if not (req.ref_images or req.ref_audio):
+        return None
+    if req.first_frame or req.last_frame:
+        return "首尾帧和参考图、参考音频不能同时用：图生视频和参考生视频是两种模式"
+    if len(req.ref_images) > REF_IMAGES_MAX:
+        return f"参考图最多 {REF_IMAGES_MAX} 张，这次有 {len(req.ref_images)} 张"
+    if len(req.ref_audio) > REF_AUDIO_MAX:
+        return f"参考音频最多 {REF_AUDIO_MAX} 段，这次有 {len(req.ref_audio)} 段"
+    low, high = REF_AUDIO_SECONDS
+    total = 0.0
+    for path in req.ref_audio:
+        if path.suffix.lower() not in media.AUDIO_TYPES:
+            return f"参考音频只能是 MP3 或 WAV：{path.name}"
+        if path.stat().st_size > REF_AUDIO_BYTES:
+            return f"参考音频不能超过 15 MB：{path.name}"
+        seconds = media.probe_duration(path)
+        if not low <= seconds <= high:
+            return f"每段参考音频要 {low:g}–{high:g} 秒：{path.name} 是 {seconds:.1f} 秒"
+        total += seconds
+    if total > high:
+        return f"参考音频合计不能超过 {high:g} 秒，这次是 {total:.1f} 秒"
+    return None
 
 
 @dataclass
@@ -152,6 +190,14 @@ class Provider:
 
 class VideoProvider(Provider):
     kind = "video"
+    supports_refs = False        # takes reference images and audio (reference-to-video)
+
+    def ref_problem(self, req: VideoRequest) -> str | None:
+        if not (req.ref_images or req.ref_audio):
+            return None
+        if not self.supports_refs:
+            return f"{self.label} 不支持参考图和参考音频"
+        return reference_problem(req)
 
     def estimate_afp(self, req: VideoRequest) -> float:
         """Plan credits this request is expected to use; 0 for providers not billed in AFP."""
@@ -181,7 +227,7 @@ class VideoProvider(Provider):
 
     def supports(self, req: VideoRequest) -> str | None:
         """Why this request cannot run here (None when it can)."""
-        return None
+        return self.ref_problem(req)
 
     def submit(self, http: httpx.Client, req: VideoRequest) -> str:
         raise NotImplementedError

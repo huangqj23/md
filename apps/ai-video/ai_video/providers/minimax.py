@@ -1,7 +1,8 @@
 """MiniMax open platform: H3 video (video generation V2) and T2A v2 speech, authorised with MINIMAX_API_KEY.
 
 An M Plan subscription key (sk-cp-…) works on the same endpoints and draws on the plan's quota.
-V2 video takes the same content array as Ark (text + images with first_frame / last_frame roles);
+V2 video takes the same content array as Ark: text plus first_frame / last_frame images, or in
+reference mode reference_image / reference_audio items (the two modes cannot be mixed);
 H3 always returns stereo audio, so the request's audio flag does not apply.
 """
 import re
@@ -71,11 +72,13 @@ class MiniMaxMixin:
 
 
 class MiniMaxVideo(MiniMaxMixin, VideoProvider):
+    supports_refs = True
+
     def supports(self, req: VideoRequest) -> str | None:
         low = 5 if self.model.endswith("Max") else 4
         if not low <= req.duration <= 15:
             return f"{self.model} 只支持 {low}–15 秒"
-        return None
+        return self.ref_problem(req)
 
     def build_body(self, req: VideoRequest) -> dict:
         return {
@@ -83,7 +86,7 @@ class MiniMaxVideo(MiniMaxMixin, VideoProvider):
             "content": media_content(req),
             "resolution": self.cfg.get("resolution", "768P"),
             "duration": req.duration,
-            "ratio": req.ratio if req.mode == "t2v" else "adaptive",
+            "ratio": req.ratio if req.mode in ("t2v", "r2v") else "adaptive",
             "aigc_watermark": False,
         }
 

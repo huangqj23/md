@@ -57,6 +57,10 @@ class Bench:
         self.providers = load_providers(cfg)
         self.plans = cfg.get("plans") or {}
         all_cases, self.speech_cases = load_cases(settings.cases_file)
+        self.case_index = {c.id: c for c in all_cases}   # cross-case references reach unselected cases too
+        for sc in self.speech_cases:
+            if sc.provider and sc.provider not in self.providers["tts"]:
+                raise ValueError(f"声音样本 {sc.id}：providers.yaml 的 tts 里没有 {sc.provider}")
         unknown = set(cases or []) - {c.id for c in all_cases}
         if unknown:
             raise ValueError(f"没有这些用例：{', '.join(sorted(unknown))}")
@@ -120,6 +124,28 @@ class Bench:
                 return path
         return None
 
+    def resolve_keyframe(self, case: Case, name: str) -> Path | None:
+        """A keyframe named by id within `case`, or as "<case>/<keyframe>"."""
+        cid, _, kf_id = name.rpartition("/")
+        return self.keyframe_for(self.case_index[cid] if cid else case, kf_id)
+
+    def speech_pairs(self, sc, active_only: bool = True) -> list[tuple[str, str]]:
+        """(provider, voice) pairs for a speech case: a voice sample pins one, any other line goes to
+        every provider and voice."""
+        if sc.provider:
+            p = self.providers["tts"][sc.provider]
+            if active_only and not (p.ready and self._selected(p.id)):
+                return []
+            return [(p.id, sc.voice or p.voices[0])]
+        pool = self.active("tts") if active_only else self.providers["tts"].values()
+        return [(p.id, voice) for p in pool for voice in p.voices]
+
+    def voice_sample(self, speech_id: str) -> Path | None:
+        sc = next(s for s in self.speech_cases if s.id == speech_id)
+        pid, voice = self.speech_pairs(sc, active_only=False)[0]
+        path = self.speech_file(sc.id, pid, voice)
+        return path if path.exists() else None
+
     def chain_keyframes(self, case: Case) -> dict[str, Path] | None:
         """Every keyframe of a chained long take from one image provider, so all segments share one
         scene; None until some provider has all of them."""
@@ -167,7 +193,7 @@ class Bench:
 
     def video_specs(self, case: Case) -> list[dict]:
         """One spec per clip to generate for this case (a chain case yields one spec per segment)."""
-        first = case.keyframes[0].id if case.keyframes else None
+        first = case.first_frame or None
         specs = []
         for mode in case.modes:
             if mode == "chain":
@@ -176,6 +202,9 @@ class Bench:
                                   "audio": False})
             elif mode == "t2v":
                 specs.append({"mode": mode, "prompt": case.t2v_prompt, "audio": case.audio})
+            elif mode == "r2v":
+                specs.append({"mode": mode, "prompt": case.r2v_prompt or case.t2v_prompt, "refs": case.refs,
+                              "ref_audio": case.ref_audio, "audio": case.audio})
             else:
                 specs.append({"mode": mode, "prompt": case.video_prompt, "first": first, "audio": case.audio})
         return specs
@@ -190,10 +219,14 @@ class Bench:
                     out = self.segment_file(case, p.id, seg) if seg else self.video_file(case, p.id, spec["mode"])
                     if out.exists() or self._blocked("video", name):
                         continue
-                    # Placeholder frame paths only mark the mode (t2v / i2v / first+last) for supports().
+                    # Placeholder paths only mark the mode (t2v / i2v / first+last / r2v) for supports();
+                    # voice samples may not exist yet, so their lengths are checked when the job runs.
                     stub = VideoRequest(prompt="", duration=case.duration, ratio=case.aspect,
                                         first_frame=Path(spec["first"]) if spec.get("first") else None,
-                                        last_frame=Path(spec["last"]) if spec.get("last") else None)
+                                        last_frame=Path(spec["last"]) if spec.get("last") else None,
+                                        ref_images=[Path(r) for r in spec.get("refs") or []])
+                    if spec["mode"] == "r2v" and not stub.ref_images:
+                        stub.ref_images = [Path("voice-only")]  # still reference mode for supports()
                     reason = p.supports(stub)
                     if reason:
                         skipped.append((name, reason))
@@ -208,14 +241,14 @@ class Bench:
     def plan_speech(self) -> list[Job]:
         jobs = []
         for sc in self.speech_cases:
-            for p in self.active("tts"):
-                for voice in p.voices:
-                    name = f"{sc.id}.{p.id}.{safe_name(voice)}"
-                    out = self.speech_file(sc.id, p.id, voice)
-                    if out.exists() or self._blocked("tts", name):
-                        continue
-                    req = SpeechRequest(text=sc.text, voice=voice, speed=sc.speed, style=sc.style)
-                    jobs.append(Job("tts", name, p.id, out, p.estimate(req), meta={"request": req, "case": sc.id}))
+            for pid, voice in self.speech_pairs(sc):
+                p = self.providers["tts"][pid]
+                name = f"{sc.id}.{pid}.{safe_name(voice)}"
+                out = self.speech_file(sc.id, pid, voice)
+                if out.exists() or self._blocked("tts", name):
+                    continue
+                req = SpeechRequest(text=sc.text, voice=voice, speed=sc.speed, style=sc.style)
+                jobs.append(Job("tts", name, pid, out, p.estimate(req), meta={"request": req, "case": sc.id}))
         return jobs
 
     # ------------------------------------------------------------ execution
@@ -263,7 +296,12 @@ class Bench:
             for kf in case.keyframes:
                 out = self.keyframe_file(case, kf.id, p.id)
                 if not out.exists():
-                    refs = [prev] if kf.ref_prev and prev else []
+                    named = [self.resolve_keyframe(case, r) for r in kf.refs]
+                    if None in named:  # not saved as a result: the next run tries again once the refs exist
+                        missing = [r for r, path in zip(kf.refs, named) if path is None]
+                        return {"state": "skipped", "keyframe": kf.id,
+                                "message": f"参考图 {', '.join(missing)} 还没生成，生成后再运行 bench images"}
+                    refs = ([prev] if kf.ref_prev and prev else []) + named
                     req = ImageRequest(prompt=kf.prompt, ratio=case.aspect, refs=refs)
                     try:
                         data = p.generate(http, req)
@@ -291,22 +329,34 @@ class Bench:
         req, base = None, {}
         if state.get("state") in TERMINAL or not state.get("task_id"):  # a new task is needed
             first = last = None
+            ref_images: list[Path] = []
+            ref_audio: list[Path] = []
             if spec["mode"] == "chain":
                 frames = self.chain_keyframes(case)
                 if frames is None:
                     return {"state": "skipped", "message": "长镜头的关键帧还没齐：需要同一家生成的全部关键帧"}
                 first, last = frames[spec["first"]], frames[spec["last"]]
+            elif spec["mode"] == "r2v":
+                images = [self.resolve_keyframe(case, r) for r in spec["refs"]]
+                voices = [self.voice_sample(a) for a in spec["ref_audio"]]
+                if None in images or None in voices:
+                    return {"state": "skipped", "message": "参考图或声音样本还没生成，先运行 bench images 和 bench tts"}
+                ref_images, ref_audio = images, voices
             elif spec["mode"] != "t2v":
-                first = self.keyframe_for(case, spec["first"])
-                last = self.keyframe_for(case, spec["last"]) if spec.get("last") else None
+                first = self.resolve_keyframe(case, spec["first"])
+                last = self.resolve_keyframe(case, spec["last"]) if spec.get("last") else None
                 if first is None or (spec.get("last") and last is None):
                     return {"state": "skipped", "message": "缺少关键帧，先运行 bench images"}
             req = VideoRequest(prompt=spec["prompt"], duration=case.duration, ratio=case.aspect,
-                               first_frame=first, last_frame=last, audio=spec["audio"])
+                               first_frame=first, last_frame=last, audio=spec["audio"],
+                               ref_images=ref_images, ref_audio=ref_audio)
+            problem = p.supports(req)  # the real files: voice sample lengths are only known now
+            if problem:
+                return {"state": "skipped", "message": problem}
             cny, afp = p.cost(req)
             base = {"case": case.id, "provider": p.id, "model": p.model, "mode": spec["mode"],
                     "seg": spec.get("seg"), "est_cny": round(cny, 3), "est_afp": round(afp, 1),
-                    "keyframes": [x.name for x in (first, last) if x]}
+                    "keyframes": [x.name for x in (first, last, *ref_images, *ref_audio) if x]}
         return run_video(p, req, job.out, state_path, base, poll_seconds=self.poll_seconds,
                          timeout_seconds=self.timeout_seconds, fetch=self.fetch,
                          on_done=lambda st: self._charge(job, *p.settle(st), mode=st.get("mode"), task_id=st.get("task_id")),

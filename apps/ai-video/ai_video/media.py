@@ -37,12 +37,43 @@ def encode_jpeg(path: Path, max_side: int = UPLOAD_SIDE, max_bytes: int = UPLOAD
         return data
 
 
+def fit_ratio(data: bytes, ratio: str, tolerance: float = 0.02) -> bytes:
+    """Centre-crop an image to `ratio` when a model returned another shape (GPT Image through a
+    gateway ignored a requested 2048x1152 and sent 3:2 or 2.33:1). Unchanged when within tolerance."""
+    with Image.open(io.BytesIO(data)) as im:
+        w, h = im.size
+        target = ratio_value(ratio)
+        if abs(w / h - target) / target <= tolerance:
+            return data
+        if w / h > target:
+            cw, ch = round(h * target), h
+        else:
+            cw, ch = w, round(w / target)
+        left, top = (w - cw) // 2, (h - ch) // 2
+        buf = io.BytesIO()
+        im.crop((left, top, left + cw, top + ch)).save(buf, "PNG")
+        return buf.getvalue()
+
+
 def data_url(path: Path) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(encode_jpeg(path)).decode()
 
 
 def raw_b64(path: Path) -> str:
     return base64.b64encode(encode_jpeg(path)).decode()
+
+
+# MiniMax takes the audio format from the MIME subtype and accepts only mp3 and wav: the standard
+# "audio/mpeg" was refused (2013: audio format ".mpeg" not allowed).
+AUDIO_TYPES = {".mp3": "audio/mp3", ".wav": "audio/wav"}
+
+
+def audio_data_url(path: Path) -> str:
+    """Reference audio as a data URL, sent unchanged (re-encoding would only cost quality)."""
+    mime = AUDIO_TYPES.get(path.suffix.lower())
+    if not mime:
+        raise ValueError(f"参考音频只能是 MP3 或 WAV：{path.name}")
+    return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode()
 
 
 def crop_windows(src: Path, dsts: list[Path], ratio: str, start: float = 0.5, step: float = 0.5) -> None:

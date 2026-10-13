@@ -47,15 +47,23 @@ IMAGE_SIZES = {
 
 
 def media_content(req: VideoRequest) -> list[dict]:
-    """Content array shared by Ark and MiniMax V2: prompt text plus first/last frame images."""
+    """Content array shared by Ark and MiniMax V2: prompt text plus first/last frame images, or in
+    reference mode reference images and audio (`supports` keeps the two modes apart)."""
     content = [{"type": "text", "text": req.prompt}]
     for role, path in (("first_frame", req.first_frame), ("last_frame", req.last_frame)):
         if path:
             content.append({"type": "image_url", "image_url": {"url": media.data_url(path)}, "role": role})
+    for path in req.ref_images:
+        content.append({"type": "image_url", "image_url": {"url": media.data_url(path)}, "role": "reference_image"})
+    for path in req.ref_audio:
+        content.append({"type": "audio_url", "audio_url": {"url": media.audio_data_url(path)},
+                        "role": "reference_audio"})
     return content
 
 
 class ArkVideo(VideoProvider):
+    supports_refs = True
+
     def headers(self) -> dict:
         return {"Authorization": f"Bearer {self.api_key}"}
 
@@ -82,7 +90,7 @@ class ArkVideo(VideoProvider):
         longest = int(self.cfg.get("max_seconds", 15))
         if not 4 <= req.duration <= longest:
             return f"{self.label} 只支持 4–{longest} 秒"
-        return None
+        return self.ref_problem(req)
 
     def video_tokens(self, req: VideoRequest) -> float:
         is_25 = self.cfg.get("size_table") == "2.5" or bool(SEEDANCE_25.search(self.model))
@@ -103,7 +111,7 @@ class ArkVideo(VideoProvider):
             "model": self.model,
             "content": media_content(req),
             "duration": req.duration,
-            "ratio": req.ratio if req.mode == "t2v" else "adaptive",
+            "ratio": req.ratio if req.mode in ("t2v", "r2v") else "adaptive",
             "generate_audio": req.audio,
             "watermark": False,
         }

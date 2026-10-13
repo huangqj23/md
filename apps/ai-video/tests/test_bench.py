@@ -1,14 +1,17 @@
+import io
+
 import httpx
 import pytest
 from PIL import Image
 
-from ai_video.bench.cases import Case
+from ai_video import media
+from ai_video.bench.cases import Case, load_cases
 from ai_video.bench.report import write_report
 from ai_video.bench.runner import Bench
 from ai_video.bench.summary import summarize
 from ai_video.config import Settings
 from ai_video.media import crop_windows
-from ai_video.providers.base import TaskStatus, VideoProvider
+from ai_video.providers.base import ImageProvider, TaskStatus, VideoProvider
 
 PROVIDERS = """
 video:
@@ -232,3 +235,132 @@ def test_upload_jpeg_is_capped_in_size_and_resolution(tmp_path):
         assert max(im.size) == UPLOAD_SIDE
     small = encode_jpeg(src, max_side=640)
     assert len(small) <= UPLOAD_BYTES
+
+
+# ---------------------------------------------------------------- reference mode and voice samples
+
+R2V_PROVIDERS = PROVIDERS.replace("image: {}\ntts: {}", """image:
+  g:
+    adapter: openai_image
+    key_env: FAKE_KEY
+    base_url: https://fake
+    model: img
+    price_cny_per_image: 0.5
+tts:
+  t:
+    adapter: minimax_tts
+    key_env: FAKE_KEY
+    base_url: https://fake
+    model: speech
+    voices: [v1, v2]
+    price_cny_per_10k_chars: 1""")
+
+R2V_CASES = """
+cases:
+  - id: sheet
+    modes: []
+    keyframes:
+      - {id: body, prompt: full body}
+      - {id: face, prompt: head shot, refs: [body]}
+      - {id: road, prompt: a road}
+  - id: shot
+    modes: [i2v, r2v]
+    duration: 6
+    first: sheet/road
+    refs: [sheet/body, sheet/road]
+    ref_audio: [hero_voice]
+    video_prompt: he walks on
+    r2v_prompt: a man in grey walks down the road
+speech:
+  - {id: hero_voice, text: 声音样本, provider: t, voice: v2}
+  - {id: line, text: 普通台词}
+"""
+
+
+class RefVideo(FakeVideo):
+    supports_refs = True
+
+
+class FakeImage(ImageProvider):
+    def __init__(self, pid, cfg):
+        super().__init__(pid, cfg)
+        self.requests = []
+
+    def generate(self, http, req):
+        self.requests.append(req)
+        buf = io.BytesIO()
+        Image.new("RGB", (32, 18)).save(buf, "PNG")
+        return buf.getvalue()
+
+
+@pytest.fixture
+def ref_bench(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_KEY", "k")
+    monkeypatch.setattr(media, "probe_duration", lambda path: 6.0)
+    (tmp_path / "providers.yaml").write_text(R2V_PROVIDERS, encoding="utf-8")
+    (tmp_path / "phase16.yaml").write_text(R2V_CASES, encoding="utf-8")
+    settings = Settings(data_dir=tmp_path / "data", providers_file=tmp_path / "providers.yaml",
+                        cases_file=tmp_path / "phase16.yaml", budget_cny=100)
+    b = Bench(settings, providers=["a", "g", "t"])
+    b.providers["video"]["a"] = video = RefVideo("a", b.providers["video"]["a"].cfg)
+    b.providers["image"]["g"] = image = FakeImage("g", b.providers["image"]["g"].cfg)
+    b.options["keyframe_provider"] = ["g"]
+    b.fetch = lambda http, url, out: (out.parent.mkdir(parents=True, exist_ok=True), out.write_bytes(b"mp4"))
+    return b, video, image
+
+
+def test_voice_sample_is_made_once_with_its_pinned_voice(ref_bench):
+    b, _, _ = ref_bench
+    assert sorted(j.name for j in b.plan_speech()) == ["hero_voice.t.v2", "line.t.v1", "line.t.v2"]
+
+
+def test_keyframes_draw_on_named_references(ref_bench):
+    b, _, image = ref_bench
+    jobs = b.plan_images()
+    assert [j.name for j in jobs] == ["sheet.g"]  # the shot case has no keyframes of its own
+    assert {r["state"] for r in b.execute(jobs)} == {"done"}
+    refs = {req.prompt: req.refs for req in image.requests}
+    assert refs["head shot"] == [b.keyframe_file(b.case_index["sheet"], "body", "g")]
+    assert refs["full body"] == [] and refs["a road"] == []
+
+
+def test_reference_clip_waits_for_its_assets_then_sends_them(ref_bench):
+    b, video, _ = ref_bench
+    jobs, skipped = b.plan_videos()
+    assert sorted(j.name for j in jobs) == ["shot.a.i2v", "shot.a.r2v"] and not skipped
+    assert {r["state"] for r in b.execute(jobs)} == {"skipped"}  # nothing generated yet
+    assert video.submitted == []
+
+    b.execute(b.plan_images())
+    sample = b.speech_file("hero_voice", "t", "v2")
+    sample.parent.mkdir(parents=True, exist_ok=True)
+    sample.write_bytes(b"ID3")
+    jobs, _ = b.plan_videos()  # skipped attempts are not results: they are planned again
+    assert {r["state"] for r in b.execute(jobs)} == {"done"}
+    sheet = b.case_index["sheet"]
+    by_mode = {req.mode: req for req in video.submitted}
+    assert by_mode["i2v"].first_frame == b.keyframe_file(sheet, "road", "g")
+    r2v = by_mode["r2v"]
+    assert r2v.prompt == "a man in grey walks down the road" and r2v.first_frame is None
+    assert r2v.ref_images == [b.keyframe_file(sheet, "body", "g"), b.keyframe_file(sheet, "road", "g")]
+    assert r2v.ref_audio == [sample]
+
+
+def test_reference_mode_is_skipped_where_unsupported(ref_bench):
+    b, _, _ = ref_bench
+    b.providers["video"]["a"] = FakeVideo("a", b.providers["video"]["a"].cfg)
+    jobs, skipped = b.plan_videos()
+    assert [j.name for j in jobs] == ["shot.a.i2v"]
+    assert skipped[0][0] == "shot.a.r2v" and "不支持参考图" in skipped[0][1]
+
+
+@pytest.mark.parametrize("patch, message", [
+    (("refs: [sheet/body, sheet/road]", "refs: [sheet/nope]"), "找不到关键帧 sheet/nope"),
+    (("ref_audio: [hero_voice]", "ref_audio: [line]"), "不是声音样本"),
+    (("    refs: [sheet/body, sheet/road]\n    ref_audio: [hero_voice]\n", ""), "r2v 模式需要"),
+])
+def test_case_names_are_checked_when_loading(tmp_path, patch, message):
+    path = tmp_path / "cases.yaml"
+    path.write_text(R2V_CASES.replace(*patch), encoding="utf-8")
+    with pytest.raises(ValueError, match=message):
+        load_cases(path)

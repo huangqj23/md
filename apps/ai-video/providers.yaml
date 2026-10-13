@@ -121,14 +121,14 @@ image:
     max_concurrency: 2
   gpt_image:
     adapter: openai_image
-    label: GPT Image 2（按量，未开通）
-    enabled: false
+    label: GPT Image 2.5（中转）
     key_env: OPENAI_API_KEY
-    base_url_env: OPENAI_BASE_URL
+    base_url_env: OPENAI_BASE_URL # 图像中转的 OpenAI 兼容地址，写在 .env；视频和配音不走中转
     base_url: https://api.openai.com/v1
-    model: gpt-image-2
+    model: gpt-image-2.5
     quality: medium
-    price_cny_per_image: 0.6
+    timeout_seconds: 300 # 生成慢时提前断开不会让中转停止计费
+    price_cny_per_image: 0.6 # 中转单价未知，先按这个估；第一张图出来后按中转账单更新
     max_concurrency: 2
 
 tts:
@@ -166,17 +166,23 @@ tts:
     max_concurrency: 2
 
 # 成片流水线（ai-video new / make）用哪些模型。依据 Phase 0 实测（reports/AI短视频全流程生成开发计划.md 6.1 节）和 v2 方案。
+# 2026-10-12 起暂时只有 MiniMax 订阅和图像中转（v3 计划 1.1 节）：关键帧走 gpt_image，视频全走 h3。
+# 拿到方舟 Key 后改回：image: seedream；video.default: seedance_25；video.draft: seedance_mini。
 routing:
-  image: seedream # 关键帧和角色参考图；封面或画面里要写字时可以临时换成 nano_banana
+  image: gpt_image # 关键帧和角色参考图；封面或画面里要写字时可以临时换成 nano_banana
   video:
-    default: seedance_25 # 默认 Seedance 2.5（2026-10-09 指定）；改回 2.0 就写 seedance（每秒约 500 AFP）
+    default: h3 # 方舟到位前的临时值；原来是 seedance_25（2026-10-09 指定，每秒约 756 AFP）
     photoreal: h3 # 写实人脸镜头（Seedance 拒收真人脸），也是 Seedance 拒绝时的自动兜底
-    draft: seedance_mini # --draft 草稿模式：480p 先出一版看节奏
+    draft: h3 # 方舟到位前的临时值（H3 没有便宜的草稿档）；原来是 seedance_mini，480p 先出一版看节奏
+    # hero: seedance_25 # 可选：剧情片里标了 hero: true 的重点镜头（钩子、高潮）单独走这个模型
+  # 剧情片的台词：native 由视频模型在生成画面时一起说（默认；2026-10-13 试听，H3 原生声音比 TTS 样本更合人物年纪）；
+  # tts 让视频只出环境声，台词用下面的 TTS 配（音色取角色的 tts_voice），只建议远景、口型不明显时用
+  dialogue: native
   tts:
     provider: minimax_tts # 先用 MiniMax；Gemini Key 修好后可改回 gemini_tts（voice 改成 Charon 等，先试听：
     voice: presenter_male # ai-video bench tts --run voices --providers gemini_tts,minimax_tts）
 
 bench:
-  keyframe_provider: [seedream] # 视频统一用这里第一个有图的关键帧，保证各家起点一致
+  keyframe_provider: [gpt_image, seedream] # 视频统一用这里第一个有图的关键帧，保证各家起点一致
   poll_seconds: 10
   timeout_minutes: 30

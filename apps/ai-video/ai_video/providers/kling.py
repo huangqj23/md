@@ -45,6 +45,9 @@ class KlingVideo(VideoProvider):
         return {"Authorization": f"Bearer {jwt_token(self.api_key, self.env('secret_env'))}"}
 
     def supports(self, req: VideoRequest) -> str | None:
+        problem = self.ref_problem(req)
+        if problem:
+            return problem
         # kling-v3 takes any length in a range (configured as durations: [3, 15]); older models only 5 or 10.
         if self.cfg.get("durations"):
             low, high = self.cfg["durations"]

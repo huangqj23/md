@@ -84,15 +84,14 @@ def gather(bench: Bench) -> dict:
     speech = []
     for sc in bench.speech_cases:
         items = []
-        for pid, p in bench.providers["tts"].items():
-            for voice in p.voices:
-                f = bench.speech_file(sc.id, pid, voice)
-                st = bench.read_state("tts", f"{sc.id}.{pid}.{safe_name(voice)}")
-                if f.exists() or st:
-                    items.append({"key": f"tts|{sc.id}|{pid}|{voice}", "provider": pid, "voice": voice,
-                                  "src": _rel(bench, f) if f.exists() else None,
-                                  "state": "done" if f.exists() else st.get("state"), "message": st.get("message", ""),
-                                  "latency_s": st.get("latency_s")})
+        for pid, voice in bench.speech_pairs(sc, active_only=False):
+            f = bench.speech_file(sc.id, pid, voice)
+            st = bench.read_state("tts", f"{sc.id}.{pid}.{safe_name(voice)}")
+            if f.exists() or st:
+                items.append({"key": f"tts|{sc.id}|{pid}|{voice}", "provider": pid, "voice": voice,
+                              "src": _rel(bench, f) if f.exists() else None,
+                              "state": "done" if f.exists() else st.get("state"), "message": st.get("message", ""),
+                              "latency_s": st.get("latency_s")})
         speech.append({"id": sc.id, "title": sc.title, "text": sc.text, "items": items})
 
     return {"run": bench.run_name, "generated_at": time.strftime("%Y-%m-%d %H:%M"), "labels": _labels(bench),

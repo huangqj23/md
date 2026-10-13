@@ -1,12 +1,14 @@
 import base64
 import hashlib
 import hmac
+import io
 import json
 
 import httpx
 import pytest
 from PIL import Image
 
+from ai_video import media
 from ai_video.errors import ProviderError, Rejected, classify
 from ai_video.providers.ark import ArkImage, ArkVideo
 from ai_video.providers.base import ImageRequest, SpeechRequest, VideoRequest
@@ -194,6 +196,48 @@ def test_minimax_v2_body_and_refusal(monkeypatch, frame):
     assert body["content"][1]["role"] == "first_frame"
     assert status.state == "rejected"
     assert p.supports(VideoRequest("p", duration=3)) is not None
+
+
+def test_reference_mode_sends_images_and_audio_with_the_requested_ratio(monkeypatch, frame, tmp_path):
+    monkeypatch.setattr(media, "probe_duration", lambda path: 6.0)
+    voice = tmp_path / "voice.mp3"
+    voice.write_bytes(b"ID3voice")
+    req = VideoRequest("p", duration=6, ratio="16:9", ref_images=[frame, frame], ref_audio=[voice])
+    h3 = MiniMaxVideo("h3", {"base_url": "https://mm.test", "model": "MiniMax-H3"})
+    ark = ArkVideo("seedance", {"base_url": "https://ark.test/api/v3", "model": "m"})
+    assert req.mode == "r2v"
+    for p in (h3, ark):
+        assert p.supports(req) is None
+        body = p.build_body(req)
+        assert body["ratio"] == "16:9"  # reference mode has no frame to follow
+        assert [(c["type"], c.get("role")) for c in body["content"]] == [
+            ("text", None), ("image_url", "reference_image"), ("image_url", "reference_image"),
+            ("audio_url", "reference_audio")]
+        assert body["content"][3]["audio_url"]["url"] == "data:audio/mp3;base64," + base64.b64encode(b"ID3voice").decode()
+
+
+def test_reference_mode_limits_are_checked_before_submitting(monkeypatch, frame, tmp_path):
+    lengths = {}
+    monkeypatch.setattr(media, "probe_duration", lambda path: lengths[path.name])
+
+    def audio(name: str, seconds: float):
+        path = tmp_path / name
+        path.write_bytes(b"x")
+        lengths[name] = seconds
+        return path
+
+    p = MiniMaxVideo("h3", {"base_url": "https://mm.test", "model": "MiniMax-H3"})
+    ok = audio("a.wav", 6)
+    assert p.supports(VideoRequest("p", ref_audio=[ok])) is None
+    assert "两种模式" in p.supports(VideoRequest("p", first_frame=frame, ref_images=[frame]))
+    assert "最多 9 张" in p.supports(VideoRequest("p", ref_images=[frame] * 10))
+    assert "最多 3 段" in p.supports(VideoRequest("p", ref_audio=[ok] * 4))
+    assert "MP3 或 WAV" in p.supports(VideoRequest("p", ref_audio=[audio("a.m4a", 6)]))
+    assert "2–15 秒" in p.supports(VideoRequest("p", ref_audio=[audio("short.wav", 1.5)]))
+    assert "合计" in p.supports(VideoRequest("p", ref_audio=[ok, audio("b.wav", 10)]))
+    kling = KlingVideo("kling", {"model": "kling-v3", "durations": [3, 15]})
+    assert "不支持参考图" in kling.supports(VideoRequest("p", ref_images=[frame]))
+    assert kling.supports(VideoRequest("p", duration=5)) is None
 
 
 def test_minimax_tts_decodes_hex_audio(monkeypatch):
@@ -629,3 +673,34 @@ def test_minimax_sends_only_the_pronunciations_the_line_uses(monkeypatch):
     with client(handler) as http:
         p.synthesize(http, req)
     assert seen["body"]["pronunciation_dict"] == {"tone": ["天姥/(tian1)(mu3)"]}
+
+
+def _png(w: int, h: int) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h), "blue").save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_fit_ratio_centre_crops_only_when_the_shape_is_off():
+    exact = _png(2048, 1152)
+    assert media.fit_ratio(exact, "16:9") == exact
+    for w, h, size in ((1536, 1024, (1536, 864)), (1916, 821, (1460, 821)), (1024, 1536, (1024, 576))):
+        with Image.open(io.BytesIO(media.fit_ratio(_png(w, h), "16:9"))) as im:
+            assert im.size == size
+
+
+def test_openai_image_returns_the_requested_ratio(monkeypatch):
+    from ai_video.providers.openai_image import OpenAIImage
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    p = OpenAIImage("gpt_image", {"key_env": "OPENAI_API_KEY", "base_url": "https://gw.test/v1", "model": "gpt-image-2.5"})
+    seen = {}
+
+    def handler(req):
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(200, json={"data": [{"b64_json": base64.b64encode(_png(1536, 1024)).decode()}]})
+
+    with client(handler) as http:
+        data = p.generate(http, ImageRequest("scene", ratio="16:9"))
+    assert seen["body"]["size"] == "2048x1152" and seen["body"]["model"] == "gpt-image-2.5"
+    with Image.open(io.BytesIO(data)) as im:
+        assert im.size == (1536, 864)
