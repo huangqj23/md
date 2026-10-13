@@ -7,6 +7,7 @@ from ..tasks import read_json, write_json
 
 STAGES = ("script", "audio", "characters", "keyframes", "videos", "compose")
 CHARACTER_VIEWS = ("body", "face")   # full-body and head reference images of each character
+TEMPLATES = ("narration", "drama")  # narration: TTS voice-over sets each shot's length; drama: dialogue, lengths in the script
 
 
 @dataclass
@@ -22,6 +23,27 @@ class Shot:
     duration: int = 0            # clip length requested from the video model, in whole seconds
     provider: str = ""           # video provider that produced the clip
     note: str = ""               # last problem with this shot (refusal, failure)
+    # Drama fields; a narration project keeps the defaults.
+    kind: str = "clip"           # clip | card (a quote card drawn at compose time, no model call)
+    seconds: int = 0             # screen time written in the script
+    voice: str = "narration"     # narration | dialogue | ambient | none: where the shot's sound comes from
+    speaker: str = ""            # character id saying `line`
+    line: str = ""               # one spoken line, generated with the clip (or by TTS, see routing.dialogue)
+    caption: str = ""            # historical note shown above the line
+    label: str = ""              # chapter label: a name, a life stage or "place · event"
+    transition: str = "cut"      # cut | dissolve | black, into this shot
+    mode: str = "frame"          # frame: first-frame image-to-video; ref: reference images, no keyframe
+    text: str = ""               # card text
+    over: str = ""               # card: the shot whose last frame the text sits on (black when empty)
+    hero: bool = False           # key shot (hook, climax): routing.video.hero when configured
+
+    @property
+    def is_card(self) -> bool:
+        return self.kind == "card"
+
+    @property
+    def needs_keyframe(self) -> bool:
+        return self.kind == "clip" and self.mode == "frame"
 
     @classmethod
     def from_dict(cls, raw: dict) -> "Shot":
@@ -46,6 +68,10 @@ class Project:
     characters: list[dict] = field(default_factory=list)   # [{id, name, look}]
     pronunciations: dict = field(default_factory=dict)      # word -> pinyin with tones, e.g. 天姥 -> (tian1)(mu3)
     shots: list[Shot] = field(default_factory=list)
+    scenes: list[dict] = field(default_factory=list)        # drama: [{id, name, look}], one reference image each
+    letterbox: float = 0.0       # drama: picture ratio inside black bars, e.g. 2.35; 0 for none
+    notice: str = ""             # drama: vertical disclaimer on the right, e.g. 剧情演绎，无不良导向
+    credits: list[str] = field(default_factory=list)        # drama: credit lines on the last shot
     created_at: str = ""
 
     @classmethod
@@ -63,6 +89,13 @@ class Project:
 
     def character(self, cid: str) -> dict | None:
         return next((c for c in self.characters if c.get("id") == cid), None)
+
+    def scene(self, sid: str) -> dict | None:
+        return next((s for s in self.scenes if s.get("id") == sid), None)
+
+    @property
+    def is_drama(self) -> bool:
+        return self.template == "drama"
 
 
 class Workspace:
@@ -100,6 +133,9 @@ class Workspace:
 
     def character_files(self, cid: str) -> list[Path]:
         return [self.character(cid, view) for view in CHARACTER_VIEWS]
+
+    def scene(self, sid: str) -> Path:
+        return self.root / "scenes" / f"{sid}.png"
 
     def clip(self, shot: Shot) -> Path:
         return self.root / "clips" / f"{shot.id}.mp4"
@@ -146,10 +182,18 @@ class Workspace:
         """Remove a character's reference images and the keyframes drawn from them; returns those shot ids."""
         for path in self.character_files(cid):
             self._remove(path)
+        return self._clear_referrers(project, cid)
+
+    def clear_scene(self, project: Project, sid: str) -> list[str]:
+        """Remove a scene's reference image and the keyframes (or reference clips) drawn from it."""
+        self._remove(self.scene(sid))
+        return self._clear_referrers(project, sid)
+
+    def _clear_referrers(self, project: Project, ref: str) -> list[str]:
         cleared = []
         for shot in project.shots:
-            if cid in shot.refs:
-                self.clear_keyframe(shot)
+            if ref in shot.refs:
+                self.clear_keyframe(shot)  # also clears the clip, which is all a reference-mode shot has
                 cleared.append(shot.id)
         return cleared
 

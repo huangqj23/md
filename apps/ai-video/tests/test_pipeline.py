@@ -352,12 +352,18 @@ def _ffmpeg(*args):
     subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *map(str, args)], check=True)
 
 
-@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
-def test_compose_builds_a_final_video(tmp_path):
-    font = next((p for p in (Path("C:/Windows/Fonts/NotoSansSC-VF.ttf"), Path("data/fonts/LXGWWenKai-Regular.ttf"))
-                 if p.exists()), None)
+def _cjk_font() -> Path:
+    candidates = (Path("C:/Windows/Fonts/NotoSansSC-VF.ttf"), Path("data/fonts/LXGWWenKai-Regular.ttf"),
+                  Path("/System/Library/Fonts/Hiragino Sans GB.ttc"), Path("/System/Library/Fonts/STHeiti Medium.ttc"))
+    font = next((p for p in candidates if p.exists()), None)
     if font is None:
         pytest.skip("no CJK font available")
+    return font
+
+
+@pytest.mark.skipif(not compose.can_burn_subtitles(), reason="needs ffmpeg built with libass (subtitles filter)")
+def test_compose_builds_a_final_video(tmp_path):
+    font = _cjk_font()
     ws = Workspace(tmp_path / "proj")
     project = Project(id="p", prompt="霜降", aspect="9:16", title="霜降", cover_title="霜降", tags=["霜降"],
                       shots=[Shot("s01", "你知道霜从哪里来吗？", "", ""), Shot("s02", "停车坐爱枫林晚。", "", "")])
@@ -443,3 +449,301 @@ def test_pronunciations_are_validated_and_a_new_reading_redoes_only_affected_aud
     data["pronunciations"] = {"枫林": "(feng2)(lin2)"}
     changes, _ = producer.import_script(ws, data)
     assert changes.audio == ["s02"]  # only s02's narration contains 枫林
+
+
+
+# ---------------------------------------------------------------- drama (template: drama)
+
+DRAMA = {
+    "prompt": "杜甫 弃官 秦州", "template": "drama", "aspect": "16:9", "seconds": 13, "style": "film-history",
+    "title": "杜甫弃官", "cover_title": "弃官", "letterbox": 2.35, "notice": "剧情演绎", "credits": ["导演：测试"],
+    "characters": [{"id": "dufu", "name": "杜甫", "look": "四十七八岁，清瘦，青灰长袍",
+                    "voice_desc": "四十七八岁，嗓音低沉略沙哑", "tts_voice": "elder_male"}],
+    "scenes": [{"id": "road", "name": "陇山道", "look": "深秋黄土山道"}],
+    "check": {"ok": True, "issues": []},
+    "shots": [
+        {"id": "s01", "seconds": 6, "voice": "dialogue", "speaker": "dufu", "line": "这官，不做了", "caption": "（759 年，杜甫弃官）",
+         "label": "杜甫", "image_prompt": "官署门口", "video_prompt": "他把官服放下", "camera": "固定", "refs": ["dufu"]},
+        {"id": "s02", "seconds": 3, "voice": "ambient", "transition": "dissolve", "mode": "ref", "refs": ["dufu", "road"],
+         "video_prompt": "他牵马走在山道上", "camera": "横移"},
+        {"id": "c01", "kind": "card", "text": "露从今夜白，月是故乡明", "seconds": 4, "over": "s02", "transition": "black"},
+    ],
+}
+
+
+def _drama(**changes) -> dict:
+    data = copy.deepcopy(DRAMA)
+    for path, value in changes.items():
+        target, keys = data, path.split("__")
+        for key in keys[:-1]:
+            target = target[int(key)] if key.isdigit() else target[key]
+        last = keys[-1]
+        target[int(last) if last.isdigit() else last] = value
+    return data
+
+
+def test_drama_import_keeps_every_field_and_writes_a_drama_storyboard(producer):
+    ws, warnings = producer.new_from_script(DRAMA)
+    project = ws.load()
+    assert project.is_drama and project.letterbox == 2.35 and project.credits == ["导演：测试"]
+    assert project.characters[0]["voice_desc"] == "四十七八岁，嗓音低沉略沙哑" and project.scenes[0]["id"] == "road"
+    s01, s02, c01 = project.shots
+    assert (s01.voice, s01.speaker, s01.line, s01.label, s01.seconds) == ("dialogue", "dufu", "这官，不做了", "杜甫", 6)
+    assert (s02.mode, s02.transition, s02.voice, s02.needs_keyframe) == ("ref", "dissolve", "ambient", False)
+    assert c01.is_card and c01.over == "s02" and c01.voice == "none" and not c01.needs_keyframe
+    assert any("不到 4 秒" in w for w in warnings)
+    board = (ws.root / "storyboard.md").read_text(encoding="utf-8")
+    assert "剧情片" in board and "杜甫：「这官，不做了」" in board and "【卡片】露从今夜白" in board and "叠化" in board
+
+
+@pytest.mark.parametrize("changes,message", [
+    ({"shots__0__seconds": None}, "seconds"),
+    ({"shots__0__line": ""}, "缺少 line"),
+    ({"shots__0__speaker": "nobody"}, "speaker"),
+    ({"shots__1__refs": []}, "参考模式"),
+    ({"shots__1__refs": ["dufu", "lake"]}, "没有声明"),
+    ({"shots__2__text": ""}, "金句卡"),
+    ({"shots__2__over": "s09"}, "over"),
+    ({"shots__1__voice": "music"}, "voice"),
+    ({"shots__1__transition": "wipe"}, "transition"),
+    ({"letterbox": 9}, "letterbox"),
+    ({"scenes": [{"id": "dufu", "look": "x"}]}, "重复"),
+])
+def test_drama_hard_errors(changes, message):
+    assert any(message in e for e in hard_errors(_drama(**changes)))
+
+
+def test_cards_are_drama_only_and_prev_needs_a_keyframe_before_it():
+    narration = copy.deepcopy(SCRIPT)
+    narration["shots"].append({"kind": "card", "text": "x", "seconds": 3})
+    assert any("只有剧情片" in e for e in hard_errors(narration))
+    data = _drama()
+    data["shots"].append({"id": "s03", "seconds": 5, "image_prompt": "x", "video_prompt": "y", "refs": ["prev"]})
+    assert any("上一个镜头没有关键帧" in e for e in hard_errors(data))  # the shot before is a card
+
+
+def test_drama_diff_redoes_only_what_a_change_touches(producer):
+    old = Project.from_dict(json.loads(json.dumps(_project_dict(producer, DRAMA))))
+    def changed(**kw):
+        new = Project.from_dict(json.loads(json.dumps(_project_dict(producer, _drama(**kw)))))
+        return diff_script(old, new)
+    assert not changed(**{"shots__0__caption": "（新注释）", "shots__2__text": "新卡片", "shots__1__transition": "cut"})
+    ch = changed(**{"shots__0__line": "这官，我不做了"})
+    assert ch.audio == ["s01"] and not ch.keyframes and not ch.clips
+    ch = changed(**{"scenes": [{"id": "road", "name": "陇山道", "look": "初冬雪后山道"}]})
+    assert ch.scenes == ["road"] and ch.keyframes == ["s02"]
+    ch = changed(**{"characters__0__voice_desc": "五十岁，嗓音苍老"})
+    assert ch.audio == ["s01"]  # the speaker's dialogue clip is remade with the new voice
+    assert changed(**{"shots__1__seconds": 5}).clips == ["s02"]
+
+
+def _project_dict(producer, data) -> dict:
+    from dataclasses import asdict
+    from ai_video.pipeline.script import apply_script
+    project = Project(id="p", prompt=data["prompt"], aspect=data["aspect"], seconds=data["seconds"], style=data["style"])
+    apply_script(project, data)
+    return asdict(project)
+
+
+def test_drama_video_prompt_and_request(producer):
+    ws, _ = producer.new_from_script(DRAMA)
+    project = ws.load()
+    s01, s02, _card = project.shots
+    prompt = producer.video_prompt(project, s01)
+    assert prompt.startswith("真实历史电影实拍质感")  # film-history video_prefix
+    assert "他把官服放下。杜甫（四十七八岁，嗓音低沉略沙哑）说：「这官，不做了。」。镜头固定。" in prompt
+    assert prompt.rstrip("。").endswith("画面中不要出现任何文字、字幕和水印")
+    assert "画面中无人说话" in producer.video_prompt(project, s02)
+    req = producer.video_request(ws, project, s01)
+    assert req.first_frame == ws.keyframe(s01) and req.audio and req.mode == "i2v"
+    req = producer.video_request(ws, project, s02)
+    assert req.mode == "r2v" and req.first_frame is None and req.audio
+    assert req.ref_images == ws.character_files("dufu") + [ws.scene("road")]
+    producer.routing["dialogue"] = "tts"
+    assert "说：" not in producer.video_prompt(project, s01) and "无人说话" in producer.video_prompt(project, s01)
+
+
+def test_drama_audio_stage_sets_lengths_and_speaks_only_on_the_tts_route(producer, monkeypatch):
+    ws, _ = producer.new_from_script(DRAMA)
+    project = ws.load()
+    said = []
+    tts = producer.providers["tts"]["mm"]
+    monkeypatch.setattr(tts, "synthesize", lambda http, req: said.append(req) or b"ID3")
+    monkeypatch.setattr("ai_video.pipeline.stages.probe_duration", lambda path: 1.5)
+    assert producer.stage_audio(ws, project) == [] and said == []  # native: the video model speaks
+    project = ws.load()
+    assert [s.duration for s in project.shots] == [6, 4, 0]  # 3 s is made at Seedance's 4 s minimum
+    producer.routing["dialogue"] = "tts"
+    producer.stage_audio(ws, project)
+    assert [(r.text, r.voice) for r in said] == [("这官，不做了", "elder_male")]
+
+
+def test_drama_estimate_skips_cards_and_reference_keyframes(producer):
+    ws, _ = producer.new_from_script(DRAMA)
+    cost = producer.estimate(ws, ws.load())
+    # characters: body + face (its one reference is free) + the scene; keyframes: s01 only
+    # (s02 is reference mode, c01 a card)
+    assert cost["characters"][1]["ark"] == 150 + 150 + 150
+    assert cost["keyframes"][1]["ark"] == 150 + 10
+    seedance = producer.providers["video"]["seedance"]
+    clips = sum(seedance.estimate_afp(VideoRequest("", duration=d, ratio="16:9")) for d in (6, 4))
+    assert cost["videos"][1]["ark"] == pytest.approx(clips)
+
+
+def test_scene_references_are_drawn_and_fed_to_keyframes(producer, fake_image):
+    data = _drama(**{"shots__0__refs": ["dufu", "road"]})
+    ws, _ = producer.new_from_script(data)
+    project = ws.load()
+    assert producer.stage_characters(ws, project) == []
+    scene = next(r for r in fake_image if "没有任何人物" in r.prompt)  # drawn alongside the character sheets
+    assert ws.scene("road").exists() and scene.ratio == "16:9" and "深秋黄土山道" in scene.prompt
+    assert producer.stage_keyframes(ws, project) == []
+    assert not ws.keyframe(project.shots[1]).exists()  # reference mode: no keyframe
+    assert fake_image[-1].refs == ws.character_files("dufu") + [ws.scene("road")]
+    assert "场景「陇山道」" in fake_image[-1].prompt
+    assert "电影黑边" in fake_image[-1].prompt  # letterbox: keep heads out of the bars
+
+
+def test_drama_timeline_overlaps_transitions():
+    from ai_video.pipeline import drama
+    project = Project.from_dict(_project_dict(None, DRAMA))
+    lengths, starts, overlaps = drama.timeline(project)
+    assert lengths == [6.0, 3.0, 4.0]
+    assert overlaps[1] == drama.DISSOLVE and overlaps[2] == pytest.approx(1.0)
+    assert starts == pytest.approx([0.0, 6.0 - drama.DISSOLVE, 9.0 - drama.DISSOLVE - 1.0], abs=1e-3)
+    for shot in project.shots:
+        shot.transition = "cut"
+    assert drama.timeline(project)[2] == [0.0, 0.0, 0.0]  # only cuts: plain concatenation
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
+def test_drama_join_keeps_every_shot_through_a_long_chain(tmp_path):
+    """Regression: cuts were one-frame xfades, and two in a row ended a 90 s film after 22 s.
+    This is that film's opening."""
+    from ai_video.pipeline import drama
+    cuts = [(6, "cut"), (6, "cut"), (6, "dissolve"), (5, "cut"), (7, "cut"), (6, "black"), (5, "cut")]
+    project = Project(id="p", prompt="x", template="drama", shots=[
+        Shot(id=f"s{i}", narration="", image_prompt="x", video_prompt="x", seconds=s, transition=t)
+        for i, (s, t) in enumerate(cuts)])
+    lengths, starts, overlaps = drama.timeline(project)
+    for i in range(1, len(starts)):
+        assert starts[i] + overlaps[i] == pytest.approx(starts[i - 1] + lengths[i - 1], abs=1e-9)
+    names = []
+    for i, length in enumerate(lengths):
+        names.append(f"v{i}.mp4")
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", f"color=c=gray:s=64x36:r={compose.FPS}",
+                        "-frames:v", str(round(length * compose.FPS)), "-pix_fmt", "yuv420p", str(tmp_path / names[-1])],
+                       check=True)
+    drama._join(names, lengths, starts, overlaps, [t for _, t in cuts], tmp_path)
+    assert probe_duration(tmp_path / "video.mp4") == pytest.approx(starts[-1] + lengths[-1], abs=0.05)
+
+
+def test_quote_cards_break_at_clauses_without_commas():
+    from ai_video.pipeline.drama import card_rows
+    assert card_rows("莫道不销魂，帘卷西风，人比黄花瘦。") == ["莫道不销魂", "帘卷西风", "人比黄花瘦"]
+    assert card_rows("谁怕？一蓑烟雨任平生") == ["谁怕？一蓑烟雨任平生"]
+    assert card_rows("一二三四五六七八九十一二三四五六七八") == ["一二三四五六七八九十一二三四五六", "七八"]
+
+
+def test_texts_of_neighbouring_shots_never_share_the_screen():
+    from ai_video.pipeline import drama
+    data = copy.deepcopy(DRAMA)
+    data["shots"].append({"id": "c02", "kind": "card", "text": "戍鼓断人行，边秋一雁声", "seconds": 4,
+                          "over": "s02", "transition": "dissolve"})
+    project = Project.from_dict(_project_dict(None, data))
+    lengths, starts, overlaps = drama.timeline(project)
+    ass = drama.build_ass(project, "LXGW WenKai", "Ma Shan Zheng", lengths, starts, 1920, 1080)
+    cards = [line.split(",")[1:3] for line in ass.splitlines() if ",Card,," in line]
+    assert len(cards) == 2 and cards[0][1] <= cards[1][0]  # the first card is gone before the second shows
+    assert cards[1][0] == compose.ass_time(starts[2] + lengths[2])  # after the dissolve into it
+    caption_end = next(line.split(",")[2] for line in ass.splitlines() if ",Caption,," in line)
+    assert caption_end <= compose.ass_time(starts[1])  # s01's note is off before s02 dissolves in
+
+
+def test_drama_subtitles_are_layered():
+    from ai_video.pipeline import drama
+    project = Project.from_dict(_project_dict(None, DRAMA))
+    lengths, starts, _ = drama.timeline(project)
+    ass = drama.build_ass(project, "LXGW WenKai", "Ma Shan Zheng", lengths, starts, 1920, 1080)
+    bar = drama.letterbox_bar(project, 1920, 1080)
+    assert bar == 131
+    for name in ("Line", "Caption", "Chapter", "Name", "Card", "Notice", "Credit", "AILabel"):
+        assert f"Style: {name}," in ass
+    assert "Style: Card,Ma Shan Zheng," in ass
+    assert ass.count(",Chapter,,") == 1 and "杜甫" in ass.split(",Chapter,,")[1]
+    assert ",Line,,0,0,0,,这官，不做了" in ass and "（759 年，杜甫弃官）" in ass
+    assert "露从今夜白\\N月是故乡明" in ass.split(",Card,,")[1]
+    assert "剧\\N情\\N演\\N绎" in ass and "《弃官》" in ass and "导演：测试" in ass
+    srt = drama.build_srt(project, lengths, starts)
+    assert "这官，不做了" in srt and "露从今夜白" in srt
+
+
+def _drama_media(tmp_path) -> tuple[Workspace, Project]:
+    ws = Workspace(tmp_path / "proj")
+    project = Project.from_dict(_project_dict(None, DRAMA))
+    s01, s02, _card = project.shots
+    ws.clip(s01).parent.mkdir(parents=True)
+    _ffmpeg("-f", "lavfi", "-i", "testsrc=duration=6.5:size=640x360:rate=24", "-f", "lavfi", "-i",
+            "sine=frequency=330:duration=6.5", "-shortest", ws.clip(s01))
+    _ffmpeg("-f", "lavfi", "-i", "testsrc2=duration=4:size=640x360:rate=24", "-f", "lavfi", "-i",
+            "sine=frequency=550:duration=4", "-shortest", ws.clip(s02))
+    ws.keyframe(s01).parent.mkdir(parents=True)
+    Image.new("RGB", (640, 360), "darkred").save(ws.keyframe(s01))
+    return ws, project
+
+
+def _mean_volume(path: Path, start: float, seconds: float) -> float:
+    err = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-ss", str(start), "-t", str(seconds), "-i", str(path),
+                          "-af", "volumedetect", "-f", "null", "-"], capture_output=True, text=True).stderr
+    return float(err.split("mean_volume:")[1].split("dB")[0])
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
+def test_drama_pictures_transitions_and_sound_buses(tmp_path):
+    """Everything before the subtitle burn, which needs libass (missing from slim ffmpeg builds)."""
+    from ai_video.pipeline import drama
+    ws, project = _drama_media(tmp_path)
+    build = ws.build
+    build.mkdir(parents=True)
+    lengths, starts, overlaps = drama.timeline(project)
+    names = []
+    for shot, length in zip(project.shots, lengths):
+        drama._picture(project, ws, shot, build / f"v_{shot.id}.mp4", length, 1920, 1080)
+        names.append(f"v_{shot.id}.mp4")
+    assert (build / "last_s02.png").exists()  # the card sits on s02's last frame
+    drama._join(names, lengths, starts, overlaps, [s.transition for s in project.shots], build)
+    total = starts[-1] + lengths[-1]
+    assert abs(probe_duration(build / "video.mp4") - total) < 0.1
+    drama._sound(project, ws, lengths, starts, total, build, None, 0.25)
+    assert abs(probe_duration(build / "mix.wav") - total) < 0.1
+    assert _mean_volume(build / "speech.wav", 1, 4) > -40      # s01 (dialogue): its own sound is speech
+    assert _mean_volume(build / "speech.wav", 7, 1.5) < -80    # s02 (ambient) is not on the speech bus
+    assert _mean_volume(build / "ambience.wav", 6, 1.5) > -40
+    assert _mean_volume(build / "mix.wav", total - 2, 1.5) < -80  # the card is silent (no BGM given)
+
+
+@pytest.mark.skipif(not compose.can_burn_subtitles(), reason="needs ffmpeg built with libass (subtitles filter)")
+def test_drama_compose_builds_a_letterboxed_film(tmp_path):
+    from ai_video.pipeline import drama
+    font = _cjk_font()
+    ws, project = _drama_media(tmp_path)
+    final = compose.render(project, ws, "Hiragino Sans GB", font, card_font=("Hiragino Sans GB", font))
+    lengths, starts, _ = drama.timeline(project)
+    assert abs(probe_duration(final) - (starts[-1] + lengths[-1])) < 0.25
+    streams = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,width,height",
+                              "-of", "csv=p=0", str(final)], capture_output=True, text=True).stdout
+    assert "video,1920,1080" in streams and "audio" in streams
+    with Image.open(_grab(final, 2.0, tmp_path / "f.png")) as im:
+        assert im.convert("L").crop((0, 0, 1920, 120)).getextrema()[1] < 40  # black bar on top
+    assert (ws.out / "cover.png").exists() and "露从今夜白" in (ws.out / "final.srt").read_text(encoding="utf-8")
+
+
+def test_compose_refuses_an_ffmpeg_that_cannot_burn_subtitles(monkeypatch, tmp_path):
+    monkeypatch.setattr(compose, "can_burn_subtitles", lambda: False)
+    with pytest.raises(RuntimeError, match="libass"):
+        compose.render(Project(id="p", prompt="x"), Workspace(tmp_path), "f", tmp_path / "f.ttf")
+
+
+def _grab(video: Path, at: float, out: Path) -> Path:
+    _ffmpeg("-ss", at, "-i", video, "-frames:v", 1, out)
+    return out

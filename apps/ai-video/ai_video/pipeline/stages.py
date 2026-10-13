@@ -5,6 +5,11 @@ language model is called. Models come from the `routing` section of providers.ya
 to the default video model unless marked photoreal; a refusal from the default model falls back to
 the photoreal one, so a shot is only lost when both refuse (it then becomes a slow push on its
 keyframe at compose time).
+
+A drama project (template: drama) takes each shot's length from the script, makes its dialogue
+with the video model (or with TTS, routing.dialogue: tts), draws scene references with the
+character references, skips the keyframe of a reference-mode shot and leaves quote cards to the
+compose step.
 """
 import logging
 import math
@@ -22,7 +27,7 @@ from ..providers import load_providers
 from ..providers.base import ImageRequest, SpeechRequest, VideoRequest
 from ..tasks import run_video
 from . import compose
-from .fonts import resolve_font
+from .fonts import CARD_FONT, resolve_font
 from .presets import get_style
 from .project import CHARACTER_VIEWS, STAGES, Project, Shot, Workspace, new_project_id
 from .script import CHARS_PER_SECOND, PREV, Changes, apply_script, diff_script, hard_errors, storyboard_markdown
@@ -38,6 +43,10 @@ CHARACTER_PROMPTS = {
 }
 CHARACTER_RATIOS = {"body": "3:4", "face": "1:1"}
 VIEW_NAMES = {"body": "全身参考图", "face": "头部参考图"}
+SCENE_PROMPT = "场景参考图：只有环境，没有任何人物，画面里没有文字"
+# Keyframes are drawn full frame, but a 2.35 letterbox hides about an eighth at the top and bottom.
+LETTERBOX_FRAMING = "宽银幕取景：画面上下各约八分之一会被电影黑边遮住，人物的头顶、脚和关键物体都放在中间部分"
+DIALOGUE_ROUTES = ("native", "tts")
 STAGE_NAMES = {"script": "剧本与分镜", "audio": "配音", "characters": "角色参考图", "keyframes": "关键帧",
                "videos": "视频", "compose": "合成"}
 
@@ -48,6 +57,9 @@ def ref_note(project: Project, shot: Shot) -> str:
     for ref in shot.refs:
         if ref == PREV:
             parts.append(f"图{n}是上一个镜头的画面，保持场景、光线和色调连贯")
+            n += 1
+        elif project.scene(ref):
+            parts.append(f"图{n}是场景「{project.scene(ref).get('name', ref)}」的参考，保持环境一致")
             n += 1
         else:
             name = (project.character(ref) or {}).get("name", ref)
@@ -91,11 +103,22 @@ class Producer:
             return self._provider("video", video["photoreal"])
         if self.draft and video.get("draft"):
             return self._provider("video", video["draft"])
+        if shot.hero and video.get("hero"):
+            return self._provider("video", video["hero"])
         return self._provider("video", video["default"])
 
     def fallback_provider(self):
         pid = (self.routing.get("video") or {}).get("photoreal")
         return self._provider("video", pid) if pid else None
+
+    @property
+    def dialogue_route(self) -> str:
+        """native: the video model speaks the line (default, fits the character's age best in the
+        2026-10 listening test); tts: the clip keeps only ambient sound and TTS says the line."""
+        route = self.routing.get("dialogue", "native")
+        if route not in DIALOGUE_ROUTES:
+            raise ValueError("routing.dialogue 只能是 native（视频模型原生台词）或 tts（TTS 配台词）")
+        return route
 
     @property
     def image_provider(self):
@@ -160,6 +183,8 @@ class Producer:
         for cid in changes.characters:
             for path in ws.character_files(cid):
                 path.unlink(missing_ok=True)
+        for sid in changes.scenes:
+            ws.scene(sid).unlink(missing_ok=True)
         for sid in changes.audio:
             ws.clear_audio(new.shot(sid))
         for sid in changes.keyframes:
@@ -198,27 +223,43 @@ class Producer:
         return [c["id"] for c in project.characters if c["id"] in used]
 
     @staticmethod
+    def scene_cast(project: Project) -> list[str]:
+        used = {r for s in project.shots for r in s.refs}
+        return [c["id"] for c in project.scenes if c["id"] in used]
+
+    @staticmethod
     def keyframe_refs(ws: Workspace, project: Project, shot: Shot) -> list[Path]:
+        """Reference images of a shot in `refs` order: the keyframe or the reference clip draws on these."""
         refs = []
         index = project.shots.index(shot)
         for ref in shot.refs:
             if ref == PREV:
                 refs.append(ws.keyframe(project.shots[index - 1]))
+            elif project.scene(ref):
+                refs.append(ws.scene(ref))
             else:
                 refs += ws.character_files(ref)
         return refs
 
     # ------------------------------------------------------------ cost
 
-    def fit_duration(self, p, audio_s: float) -> int:
-        """Shortest whole-second clip the provider accepts that covers the line plus the pause."""
+    @staticmethod
+    def _shortest(p, need: int) -> int:
         longest = int(p.cfg.get("max_seconds", 15))
-        need = max(1, math.ceil(audio_s + compose.GAP))
         probe = Path("probe")
-        for d in range(need, longest + 1):
+        for d in range(max(1, need), longest + 1):
             if p.supports(VideoRequest(prompt="", duration=d, first_frame=probe)) is None:
                 return d
         return longest
+
+    def fit_duration(self, p, audio_s: float) -> int:
+        """Shortest whole-second clip the provider accepts that covers the line plus the pause."""
+        return self._shortest(p, math.ceil(audio_s + compose.GAP))
+
+    def clip_seconds(self, p, shot: Shot) -> int:
+        """Drama: the shortest clip the provider accepts that covers the scripted screen time (a 3 s
+        shot is made at the model's 4 s minimum and trimmed when composing)."""
+        return self._shortest(p, shot.seconds)
 
     def estimate(self, ws: Workspace, project: Project) -> dict[str, tuple[float, Counter]]:
         """¥ and plan credits (AFP by plan) still to spend, per stage."""
@@ -235,16 +276,23 @@ class Producer:
                 if not ws.has(ws.character(cid, view)):
                     refs = [Path("body")] if view == "face" else []
                     add("characters", img, img.cost(ImageRequest(prompt="", ratio=CHARACTER_RATIOS[view], refs=refs)))
+        for sid in self.scene_cast(project):
+            if not ws.has(ws.scene(sid)):
+                add("characters", img, img.cost(ImageRequest(prompt="", ratio=project.aspect)))
         for shot in project.shots:
-            if not ws.has(ws.keyframe(shot)):
+            if shot.is_card:
+                continue  # drawn at compose time
+            if shot.needs_keyframe and not ws.has(ws.keyframe(shot)):
                 add("keyframes", img, img.cost(ImageRequest(prompt="", ratio=project.aspect,
                                                             refs=self.keyframe_refs(ws, project, shot))))
             if not ws.has(ws.clip(shot)):
                 p = self.video_provider(shot)
-                audio_s = shot.audio_s or len(shot.narration) / CHARS_PER_SECOND
-                duration = shot.duration or self.fit_duration(p, audio_s)
+                if project.is_drama:
+                    duration = shot.duration or self.clip_seconds(p, shot)
+                else:
+                    duration = shot.duration or self.fit_duration(p, shot.audio_s or len(shot.narration) / CHARS_PER_SECOND)
                 add("videos", p, p.cost(VideoRequest(prompt="", duration=duration, ratio=project.aspect,
-                                                     first_frame=Path("probe"))))
+                                                     first_frame=Path("probe") if shot.needs_keyframe else None)))
         return {stage: (round(cny, 2), afp) for stage, (cny, afp) in out.items()}
 
     def _charge(self, project: Project, kind: str, p, name: str, cny: float, afp: float = 0.0, **extra) -> None:
@@ -264,50 +312,91 @@ class Producer:
         self.write_storyboard(ws, project)
         return []
 
-    def stage_audio(self, ws: Workspace, project: Project) -> list[str]:
-        p, voice = self.tts
+    def _speak(self, ws: Workspace, project: Project, p, shot: Shot, text: str, voice: str) -> str | None:
+        """Synthesise one shot's spoken audio (narration, or a drama line on the TTS route)."""
         style = get_style(project.style)
+        req = SpeechRequest(text=text, voice=voice, speed=style.speed, style=style.tts_style,
+                            pronunciations=project.pronunciations)
+        with p.client() as http:
+            try:
+                audio = p.synthesize(http, req)
+            except Unconfirmed as e:
+                self._charge(project, "tts", p, shot.id, *p.cost(req), status="unconfirmed")
+                return f"{shot.id} 配音结果未知（可能已扣费）：{e}"
+            except ProviderError as e:
+                return f"{shot.id} 配音失败：{e}"
+        path = ws.audio(shot)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(audio)
+        self._charge(project, "tts", p, shot.id, *p.cost(req))
+        return None
+
+    def spoken_by_tts(self, project: Project, shot: Shot) -> tuple[str, str] | None:
+        """(text, voice) when a shot's speech is made by TTS rather than by the video model."""
+        p, voice = self.tts
+        if shot.is_card:
+            return None
+        if shot.voice == "narration" and shot.narration:
+            return shot.narration, voice
+        if project.is_drama and shot.voice == "dialogue" and self.dialogue_route == "tts":
+            return shot.line, (project.character(shot.speaker) or {}).get("tts_voice") or voice
+        return None
+
+    def stage_audio(self, ws: Workspace, project: Project) -> list[str]:
+        p, _ = self.tts
+        todo = [(s, spoken) for s in project.shots
+                if (spoken := self.spoken_by_tts(project, s)) and not ws.audio(s).exists()]
         problems = []
-        todo = [s for s in project.shots if not ws.audio(s).exists()]
-
-        def synth(shot: Shot) -> tuple[Shot, str | None]:
-            req = SpeechRequest(text=shot.narration, voice=voice or p.voices[0], speed=style.speed,
-                                style=style.tts_style, pronunciations=project.pronunciations)
-            with p.client() as http:
-                try:
-                    audio = p.synthesize(http, req)
-                except Unconfirmed as e:
-                    self._charge(project, "tts", p, shot.id, *p.cost(req), status="unconfirmed")
-                    return shot, f"{shot.id} 配音结果未知（可能已扣费）：{e}"
-                except ProviderError as e:
-                    return shot, f"{shot.id} 配音失败：{e}"
-            path = ws.audio(shot)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(audio)
-            self._charge(project, "tts", p, shot.id, *p.cost(req))
-            return shot, None
-
         with ThreadPoolExecutor(max_workers=int(p.cfg.get("max_concurrency", 2))) as pool:
-            for shot, problem in pool.map(synth, todo):
+            for problem in pool.map(lambda item: self._speak(ws, project, p, item[0], *item[1]), todo):
                 if problem:
                     problems.append(problem)
         for shot in project.shots:
+            if shot.is_card:
+                continue
             if ws.audio(shot).exists():
                 shot.audio_s = round(probe_duration(ws.audio(shot)), 3)
-                p_video = self.video_provider(shot)
+            p_video = self.video_provider(shot)
+            longest = int(p_video.cfg.get("max_seconds", 15))
+            if project.is_drama:
+                shot.duration = self.clip_seconds(p_video, shot)
+                if shot.seconds > longest:
+                    problems.append(f"{shot.id} 写了 {shot.seconds} 秒，超过 {p_video.label} 单段 {longest} 秒上限，"
+                                    f"合成时会定格补足；建议拆成两个镜头")
+                if shot.audio_s > shot.seconds:
+                    problems.append(f"{shot.id} 的配音 {shot.audio_s:.1f} 秒，比镜头的 {shot.seconds} 秒长，会被截断")
+            elif ws.audio(shot).exists():
                 shot.duration = self.fit_duration(p_video, shot.audio_s)
-                longest = int(p_video.cfg.get("max_seconds", 15))
                 if shot.audio_s + compose.GAP > longest:
                     problems.append(f"{shot.id} 旁白 {shot.audio_s:.1f} 秒，超过单个镜头 {longest} 秒上限，建议拆成两个镜头")
         ws.save(project)
         return problems
 
     def stage_characters(self, ws: Workspace, project: Project) -> list[str]:
-        cast = self.cast(project)
-        if not cast:
+        cast, scenes = self.cast(project), self.scene_cast(project)
+        if not cast and not scenes:
             return []
         p = self.image_provider
         style = get_style(project.style)
+
+        def draw_scene(sid: str) -> str | None:
+            out = ws.scene(sid)
+            if out.exists():
+                return None
+            look = (project.scene(sid) or {}).get("look", "")
+            req = ImageRequest(prompt=f"{look}。{SCENE_PROMPT}。{style.image_suffix}", ratio=project.aspect)
+            with p.client() as http:
+                try:
+                    data = p.generate(http, req)
+                except Unconfirmed as e:
+                    self._charge(project, "image", p, f"scene_{sid}", *p.cost(req), status="unconfirmed")
+                    return f"场景 {sid} 的参考图结果未知（可能已扣费）：{e}"
+                except ProviderError as e:
+                    return f"场景 {sid} 的参考图失败：{e}"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(data)
+            self._charge(project, "image", p, f"scene_{sid}", *p.cost(req))
+            return None
 
         def draw(cid: str) -> str | None:
             look = (project.character(cid) or {}).get("look", "")
@@ -332,7 +421,8 @@ class Producer:
             return None
 
         with ThreadPoolExecutor(max_workers=int(p.cfg.get("max_concurrency", 2))) as pool:
-            return [r for r in pool.map(draw, cast) if r]
+            jobs = [pool.submit(draw, cid) for cid in cast] + [pool.submit(draw_scene, sid) for sid in scenes]
+            return [r for r in (job.result() for job in jobs) if r]
 
     def stage_keyframes(self, ws: Workspace, project: Project) -> list[str]:
         p = self.image_provider
@@ -344,7 +434,8 @@ class Producer:
             if missing:
                 shot.note = f"缺少参考图 {', '.join(missing)}：先生成角色参考图或上一镜的关键帧"
                 return f"{shot.id} {shot.note}"
-            req = ImageRequest(prompt=f"{ref_note(project, shot)}{shot.image_prompt}。{style.image_suffix}",
+            framing = f"。{LETTERBOX_FRAMING}" if project.letterbox else ""
+            req = ImageRequest(prompt=f"{ref_note(project, shot)}{shot.image_prompt}{framing}。{style.image_suffix}",
                                ratio=project.aspect, refs=refs)
             with p.client() as http:
                 try:
@@ -363,7 +454,7 @@ class Producer:
             self._charge(project, "image", p, shot.id, *p.cost(req))
             return None
 
-        todo = [s for s in project.shots if not ws.keyframe(s).exists()]
+        todo = [s for s in project.shots if s.needs_keyframe and not ws.keyframe(s).exists()]
         independent = [s for s in todo if PREV not in s.refs]
         chained = [s for s in todo if PREV in s.refs]
         with ThreadPoolExecutor(max_workers=int(p.cfg.get("max_concurrency", 2))) as pool:
@@ -375,11 +466,48 @@ class Producer:
         ws.save(project)
         return problems
 
-    def _make_clip(self, ws: Workspace, project: Project, shot: Shot) -> str | None:
+    @staticmethod
+    def spoken_line(project: Project, shot: Shot) -> str:
+        """The line as the video model should say it, with the speaker's voice description."""
+        c = project.character(shot.speaker) or {}
+        voice = f"（{c['voice_desc']}）" if c.get("voice_desc") else ""
+        line = shot.line.rstrip("。")
+        if line[-1:] not in "？！…?!":
+            line += "。"
+        return f"{c.get('name', shot.speaker)}{voice}说：「{line}」"
+
+    def video_prompt(self, project: Project, shot: Shot) -> str:
         style = get_style(project.style)
-        camera = f"镜头{shot.camera}。" if shot.camera else ""
-        req = VideoRequest(prompt=f"{shot.video_prompt}。{camera}{style.video_suffix}", duration=shot.duration,
-                           ratio=project.aspect, first_frame=ws.keyframe(shot), audio=False)
+        if not project.is_drama:
+            camera = f"镜头{shot.camera}。" if shot.camera else ""
+            return f"{shot.video_prompt}。{camera}{style.video_suffix}"
+        parts = [style.video_prefix, shot.video_prompt]
+        if shot.voice == "dialogue" and self.dialogue_route == "native":
+            parts.append(self.spoken_line(project, shot))
+        else:
+            parts.append("画面中无人说话")  # a clip may still invent speech; only ambient sound is wanted
+        if shot.camera:
+            parts.append(f"镜头{shot.camera}")
+        parts.append(style.video_suffix)
+        return "。".join(part.rstrip("。") for part in parts if part) + "。"
+
+    def video_request(self, ws: Workspace, project: Project, shot: Shot) -> VideoRequest:
+        """Frame mode animates the keyframe; reference mode composes from the character and scene
+        images. Drama clips keep their sound when it is used (dialogue, ambience)."""
+        audio = project.is_drama and shot.voice in ("dialogue", "ambient")
+        duration = shot.duration or (self.clip_seconds(self.video_provider(shot), shot) if project.is_drama else 5)
+        if shot.mode == "ref":
+            return VideoRequest(prompt=self.video_prompt(project, shot), duration=duration, ratio=project.aspect,
+                                audio=audio, ref_images=self.keyframe_refs(ws, project, shot))
+        return VideoRequest(prompt=self.video_prompt(project, shot), duration=duration, ratio=project.aspect,
+                            first_frame=ws.keyframe(shot), audio=audio)
+
+    def _make_clip(self, ws: Workspace, project: Project, shot: Shot) -> str | None:
+        req = self.video_request(ws, project, shot)
+        missing = [r.name for r in req.ref_images if not r.exists()]
+        if missing:
+            shot.note = f"缺少参考图 {', '.join(missing)}：先跑 characters 阶段"
+            return f"{shot.id} {shot.note}"
         candidates = [self.video_provider(shot)]
         fallback = self.fallback_provider()
         if fallback and fallback.id != candidates[0].id:
@@ -414,10 +542,10 @@ class Producer:
         return f"{shot.id} {shot.note}"
 
     def stage_videos(self, ws: Workspace, project: Project) -> list[str]:
-        missing = [s.id for s in project.shots if not ws.keyframe(s).exists()]
+        missing = [s.id for s in project.shots if s.needs_keyframe and not ws.keyframe(s).exists()]
         if missing:
             return [f"这些镜头没有关键帧，跳过：{', '.join(missing)}"]
-        todo = [s for s in project.shots if not ws.clip(s).exists()]
+        todo = [s for s in project.shots if not s.is_card and not ws.clip(s).exists()]
         groups: dict[str, list[Shot]] = {}
         for shot in todo:
             groups.setdefault(self.video_provider(shot).id, []).append(shot)
@@ -441,7 +569,8 @@ class Producer:
     def stage_compose(self, ws: Workspace, project: Project, bgm: Path | None = None) -> Path:
         style = get_style(project.style)
         family, font_file = resolve_font(style.font, self.settings.data_dir / "fonts")
-        return compose.render(project, ws, family, font_file, bgm=bgm)
+        card_font = resolve_font(CARD_FONT, self.settings.data_dir / "fonts") if project.is_drama else None
+        return compose.render(project, ws, family, font_file, bgm=bgm, card_font=card_font)
 
     def make(self, ws: Workspace, until: str = "compose", bgm: Path | None = None) -> dict:
         """Run the stages in order up to `until`; finished outputs are reused."""

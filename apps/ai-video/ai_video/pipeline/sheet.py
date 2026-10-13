@@ -75,16 +75,19 @@ def contact_sheet(ws: Workspace, project: Project, what: str) -> Path:
     if what == "keyframes":
         items = [(f"{cid}_{view}", ws.character(cid, view)) for c in project.characters
                  for cid in [c["id"]] for view in CHARACTER_VIEWS if ws.character(cid, view).exists()]
-        items += [(s.id, ws.keyframe(s)) for s in project.shots]
+        items += [(f"scene_{c['id']}", ws.scene(c["id"])) for c in project.scenes if ws.scene(c["id"]).exists()]
+        items += [(s.id, ws.keyframe(s)) for s in project.shots if s.needs_keyframe]  # cards and reference shots have none
         return _tile(items, out)
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         items = []
         if what == "clips":
             for s in project.shots:
+                if s.is_card:
+                    continue
                 clip = ws.clip(s)
                 frame = tmp_dir / f"{s.id}.png"
-                ok = clip.exists() and _frame(clip, max(0.0, min(_duration(clip), s.audio_s or 4) / 2), frame)
+                ok = clip.exists() and _frame(clip, max(0.0, min(_duration(clip), s.seconds or s.audio_s or 4) / 2), frame)
                 items.append((f"{s.id} {s.provider}".strip(), frame if ok else None))
         elif what == "final":
             final = ws.out / "final.mp4"

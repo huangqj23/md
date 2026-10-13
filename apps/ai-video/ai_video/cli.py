@@ -9,6 +9,7 @@ import os
 import shutil
 import sys
 from collections import Counter, defaultdict
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
@@ -21,6 +22,7 @@ from .config import Settings, load_settings, load_yaml
 from .errors import ProviderError
 from .ledger import Ledger
 from .net import call, make_client
+from .pipeline.compose import can_burn_subtitles
 from .pipeline.project import STAGES
 from .pipeline.script import load_script
 from .pipeline.sheet import contact_sheet
@@ -28,7 +30,7 @@ from .pipeline.stages import STAGE_NAMES, Producer
 from .providers import load_providers
 
 KIND_NAMES = {"video": "视频", "image": "图片", "tts": "配音"}
-STEPS = ("images", "videos", "tts")
+STEPS = ("images", "tts", "videos")   # speech before videos: reference-mode clips use voice samples
 STEP_NAMES = {"images": "关键帧图片", "videos": "视频", "tts": "配音"}
 STEP_KINDS = {"images": "image", "videos": "video", "tts": "tts"}
 PAID_STAGES = ("characters", "keyframes", "videos")
@@ -65,7 +67,12 @@ def cmd_check(args, settings: Settings) -> int:
                 print(f"  {'':<14} ! {warning}")
     routing = cfg.get("routing") or {}
     print(f"\n路由：关键帧 {routing.get('image')}，视频 {routing.get('video')}，配音 {routing.get('tts')}")
-    print(f"ffmpeg：{'已安装' if shutil.which('ffmpeg') else '未安装（无法合成成片）'}")
+    if not shutil.which("ffmpeg"):
+        print("ffmpeg：未安装（无法合成成片）")
+    elif not can_burn_subtitles():
+        print("ffmpeg：已安装，但没有 subtitles 滤镜（缺 libass），烧不了字幕，合成会失败：换完整版 ffmpeg")
+    else:
+        print("ffmpeg：已安装")
     print(f"数据目录：{settings.data_dir}")
     return 0
 
@@ -187,7 +194,8 @@ def cmd_script(args, settings: Settings) -> int:
     changes, warnings = producer.import_script(ws, load_script(args.file))
     for warning in warnings:
         print(f"  ? {warning}")
-    rows = [("角色参考图", changes.characters), ("配音和视频", changes.audio), ("关键帧和视频", changes.keyframes),
+    rows = [("角色参考图", changes.characters), ("场景参考图", changes.scenes), ("配音和视频", changes.audio),
+            ("关键帧和视频", changes.keyframes),
             ("只重做视频", changes.clips), ("删掉的镜头", changes.removed)]
     if not changes:
         print("剧本已更新，没有要重做的产物")
@@ -259,6 +267,8 @@ def confirm(total: float, budget: float, yes: bool, afp_lines: list[str] = (), a
 
 
 def cmd_bench(args, settings: Settings) -> int:
+    if args.file:
+        settings = replace(settings, cases_file=args.file)
     bench = Bench(settings, run=args.run, cases=_split(args.cases), providers=_split(args.providers),
                   retry_failed=args.retry_failed)
     if args.step == "report":
@@ -341,9 +351,10 @@ def main(argv: list[str] | None = None) -> int:
 
     p_bench = sub.add_parser("bench", help="模型对比测试")
     p_bench.add_argument("step", choices=["plan", "images", "videos", "tts", "run", "report", "summary"],
-                         help="plan 只列任务和预算；run 依次跑 images → videos → tts")
+                         help="plan 只列任务和预算；run 依次跑 images → tts → videos")
     p_bench.add_argument("--run", default="round2",
                          help="这一轮测试的名字（数据目录 data/bench/<run>）；phase0 是之前的测试结果，别覆盖")
+    p_bench.add_argument("--file", type=Path, help="用例文件，默认 bench/cases.yaml（Phase 1.6 用 bench/phase16.yaml）")
     p_bench.add_argument("--cases", help="只跑这些用例，逗号分隔")
     p_bench.add_argument("--providers", help="只用这些模型，逗号分隔（providers.yaml 里的 id）")
     p_bench.add_argument("--retry-failed", action="store_true", help="重新提交被拒绝或失败的任务")

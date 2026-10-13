@@ -1,4 +1,4 @@
-"""Style presets (presets/styles.yaml): prompt suffixes, subtitle font, narration speed and delivery."""
+"""Style presets (presets/styles.yaml): prompt prefixes and suffixes, subtitle font, narration speed and delivery."""
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +18,7 @@ class Style:
     speed: float
     tts_style: str = ""          # narration delivery in words, for TTS models steered by prompts (Gemini)
     character_suffix: str = ""   # rendering only, for character references: scene words would leak into them
+    video_prefix: str = ""       # shared opening of every video prompt (framing, camera, texture), for drama
 
 
 def load_styles(path: Path = STYLES_FILE) -> dict[str, Style]:
@@ -25,7 +26,8 @@ def load_styles(path: Path = STYLES_FILE) -> dict[str, Style]:
     return {sid: Style(id=sid, label=c.get("label", sid), hint=c.get("hint", ""),
                        image_suffix=c.get("image_suffix", ""), video_suffix=c.get("video_suffix", ""),
                        font=c.get("font", "Noto Sans SC"), speed=float(c.get("speed", 1.0)),
-                       tts_style=c.get("tts_style", ""), character_suffix=c.get("character_suffix", ""))
+                       tts_style=c.get("tts_style", ""), character_suffix=c.get("character_suffix", ""),
+                       video_prefix=c.get("video_prefix", ""))
             for sid, c in raw.items()}
 
 

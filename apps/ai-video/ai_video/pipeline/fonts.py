@@ -15,7 +15,11 @@ FONTS = {
                     "url": "https://github.com/lxgw/LxgwWenKai/releases/download/v1.522/LXGWWenKai-Regular.ttf"},
     "Source Han Serif SC": {"file": "Source Han Serif SC Heavy (TrueType).ttf"},
     "Noto Sans SC": {"file": "NotoSansSC-VF.ttf"},
+    # Brush-script font for drama quote cards (not a subtitle fallback).
+    "Ma Shan Zheng": {"file": "MaShanZheng-Regular.ttf",
+                      "url": "https://github.com/google/fonts/raw/main/ofl/mashanzheng/MaShanZheng-Regular.ttf"},
 }
+CARD_FONT = "Ma Shan Zheng"
 FALLBACK_ORDER = ["LXGW WenKai", "Source Han Serif SC", "Noto Sans SC"]
 
 

@@ -66,6 +66,16 @@ AI 短视频流水线，包括成片和模型对比两部分。
 - **只换视频**：`make --revideo s07`，配音和关键帧保留。
 - **背景音乐**：`make --bgm 某首歌.mp3`，人声出现时自动压低。如果要用抖音曲库里的歌，就不要加 `--bgm`，发布时在抖音里选。
 
+**剧情片**（剧本里写 `"template": "drama"`，字段见 `short-video` 技能的 script-schema.md）和旁白片的不同：
+
+- 镜头时长写在剧本里（`seconds`），不由配音反推；不到 4 秒的按 4 秒生成再裁掉。
+- 台词默认由视频模型在生成画面时一起说出来（`routing.dialogue: native`），提示词里会带上角色的 `voice_desc`；改成 `tts` 则视频只出环境声，台词用 TTS 配。
+- 合成时保留镜头原声：台词和旁白进「人声」，环境声镜头进「环境声」；背景音乐只被人声压低。
+- 字幕分层：左上章节标签、台词上方的史实注释、下方黑边里的台词、书法字金句卡（`kind: "card"`，不调用模型）、第 5 秒的《片名》、右侧竖排声明、片尾署名。
+- 转场支持叠化和经黑场（`transition`），`letterbox: 2.35` 加电影黑边。
+- `scenes` 声明的场景在 characters 阶段出参考图；参考模式（`mode: "ref"`）的镜头不画关键帧，直接用角色图和场景图生成视频。
+- 合成要用带 libass 的 ffmpeg（`subtitles` 滤镜），`ai-video check` 会提示。Homebrew 默认的 ffmpeg 是精简版，要改装 `ffmpeg-full`：`brew install ffmpeg-full && brew unlink ffmpeg && brew link --force ffmpeg-full`。
+
 **项目文件夹** `data/projects/<id>/`：
 
 | 文件                                         | 内容                                                                                |
@@ -73,6 +83,7 @@ AI 短视频流水线，包括成片和模型对比两部分。
 | `project.json`                               | 剧本、角色、分镜，以及每个镜头的旁白、提示词、参考、时长、用了哪个模型              |
 | `storyboard.md`                              | 分镜表、角色和事实核查结果，方便阅读                                                |
 | `audio/` `characters/` `keyframes/` `clips/` | 配音、角色参考图（全身 + 大头照）、首帧、视频                                       |
+| `scenes/`                                    | 剧情片的场景参考图                                                                  |
 | `sheets/`                                    | 联系表图片                                                                          |
 | `out/final.mp4`                              | 成片：1080p、30fps、-16 LUFS，字幕烧录，右上角「AI 生成」角标，元数据里有 AIGC 标识 |
 | `out/publish.md`                             | 发布用的标题、话题、引用出处和发布前检查清单                                        |
@@ -80,6 +91,7 @@ AI 短视频流水线，包括成片和模型对比两部分。
 
 **路由规则**（`providers.yaml` 的 `routing`）：
 
+- **2026-10-12 起暂时**：方舟 Key 到位前，关键帧走 gpt-image-2.5 中转（`gpt_image`），视频全走 MiniMax H3（扣 M Plan 周额度，约每秒 0.41%）。下面是方舟到位后的设置。
 - 关键帧和角色参考图用 Seedream 5.0 Pro（1.5K，每张 150 AFP）。
 - 视频默认用 Seedance 2.5 720p（`routing.video.default`，改成 `seedance` 就回到 2.0）。
 - 写实人脸镜头（分镜里写了 `photoreal: true`）用 MiniMax H3；Seedance 拒收时也自动改用 H3。两家都失败的镜头，合成时用它的关键帧做缓推代替。
@@ -106,15 +118,16 @@ copy .env.example .env
 
 ```powershell
 .venv\Scripts\ai-video bench plan      # 列出全部任务和预计花费，不调用接口
-.venv\Scripts\ai-video bench run       # 关键帧 → 视频 → 配音，开始前确认预算和套餐额度
+.venv\Scripts\ai-video bench run       # 关键帧 → 配音 → 视频，开始前确认预算和套餐额度
 .venv\Scripts\ai-video bench tts --run voices --providers gemini_tts,minimax_tts   # 音色试听
 ```
 
-- 可以分步跑：`bench images`（先在报告里看关键帧）→ `bench videos` → `bench tts`。
+- 可以分步跑：`bench images`（先在报告里看关键帧）→ `bench tts` → `bench videos`。配音排在视频前面，因为参考模式的视频要用声音样本。
 - 默认的测试轮次叫 `round2`，数据存在 `data/bench/round2/`。`data/bench/phase0/` 是之前那轮的结果，不要覆盖。
 
 常用参数：
 
+- `--file bench/phase16.yaml`：换一个用例文件（默认 `bench/cases.yaml`）
 - `--cases taigong_mist,beauty_closeup`：只跑部分用例（第一次建议先这样小范围试跑）
 - `--providers seedance,h3`：只用部分模型
 - `--retry-failed`：重新提交被拒绝或失败的任务
@@ -145,6 +158,13 @@ copy .env.example .env
 | `electron_scifi`  | 物理科幻叙事："宇宙里可能只有一个电子"                                                             |
 
 另有 3 段配音（古诗朗诵、节气旁白、物理讲解），每段带一句 `style` 语气说明，Gemini 配音会按它演绎。
+
+**Phase 1.6 实测**（`bench/phase16.yaml`，v3 计划 8.1 节 Step 1）测剧情片要用的能力：H3 原生中文台词、参考模式加声音样本、首帧与参考模式对比、写实人脸、单次生成多镜头。用例文件的写法：
+
+- `modes: []` 的用例只出图（场景、角色参考图），给别的用例引用；
+- `用例/关键帧`（如 `p16_dufu/body`）引用别的用例的图，可以写在关键帧的 `refs`、用例的 `first` 和 `refs` 里；
+- `r2v` 是参考模式：`refs` 是参考图，`ref_audio` 是声音样本，`r2v_prompt` 要写出场景（没有首帧可依）；
+- `speech` 里写了 `provider`（和可选的 `voice`）的是声音样本，只用这一家、这一个音色生成一次。
 
 ## 断点续跑与记账
 
@@ -186,4 +206,4 @@ copy .env.example .env
   - `sheet.py`：联系表。
 - `ai_video/quota.py`：套餐额度统计和闸门；`ai_video/ledger.py`：账本
 - `ai_video/bench/`：模型对比（任务规划、按厂商分池并发、报告页、评分汇总）
-- 测试：`.venv\Scripts\python -m pytest`
+- 测试：`.venv\Scripts\python -m pytest`（macOS / Linux 用 `.venv/bin/python -m pytest`）

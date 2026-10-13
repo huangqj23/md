@@ -6,6 +6,7 @@ on its keyframe instead. Narration lines are padded to the same slots, an option
 under the voice, subtitles and a small "AI生成" label are burned in, loudness ends at -16 LUFS, and
 the file carries the implicit AIGC label of GB 45438-2025 (an `AIGC` metadata field plus a comment).
 """
+import functools
 import json
 import shutil
 import subprocess
@@ -33,6 +34,26 @@ def ffmpeg(args: list, cwd: Path | None = None) -> None:
                           cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if proc.returncode != 0:
         raise RuntimeError(f"ffmpeg 失败：{proc.stderr.strip()[-800:]}")
+
+
+SUBTITLES_MISSING = ("这个 ffmpeg 没有 subtitles 滤镜（编译时没带 libass），烧不了字幕和「AI生成」角标，成片做不出来："
+                     "换一个完整版 ffmpeg。Windows 可以用 gyan.dev 的 full 版；macOS 上 Homebrew 默认的 ffmpeg 是精简版，"
+                     "要改装 ffmpeg-full：brew install ffmpeg-full && brew unlink ffmpeg && brew link --force ffmpeg-full")
+
+
+@functools.lru_cache(maxsize=1)
+def ffmpeg_filters() -> frozenset[str]:
+    """Names of the filters the installed ffmpeg was built with (empty when there is no ffmpeg)."""
+    exe = shutil.which("ffmpeg")
+    if not exe:
+        return frozenset()
+    out = subprocess.run([exe, "-hide_banner", "-filters"], capture_output=True, text=True).stdout
+    return frozenset(parts[1] for line in out.splitlines() if len(parts := line.split()) > 2 and "->" in parts[2])
+
+
+def can_burn_subtitles() -> bool:
+    """Subtitles and the AI label are burned in with libass; slim builds (Homebrew's default) lack it."""
+    return "subtitles" in ffmpeg_filters()
 
 
 def frame_align(seconds: float) -> float:
@@ -112,7 +133,7 @@ def build_ass(project: Project, font: str, starts: list[float], ai_label: bool =
         "MarginR, MarginV, Encoding",
         f"Style: Sub,{font},{sub_size},&H00FFFFFF,&H00FFFFFF,&H00202020,&H64000000,0,0,0,0,100,100,2,0,1,3,1,2,60,60,{sub_margin},1",
         f"Style: Title,{font},{title_size},&H00F0F8FF,&H00FFFFFF,&H00101010,&H64000000,1,0,0,0,100,100,6,0,1,5,2,8,60,60,{title_margin},1",
-        f"Style: Label,{font},{label_size},&H60FFFFFF,&H60FFFFFF,&H80000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,9,40,40,40,1",
+        f"Style: Label,{font},{label_size},&H20FFFFFF,&H20FFFFFF,&H40000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,9,40,40,40,1",
         "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
     if project.cover_title and starts:
@@ -140,6 +161,10 @@ def publish_notes(project: Project, video: Path) -> str:
     if project.source:
         s = project.source
         lines += [f"引用：{s.get('author', '')}《{s.get('title', '')}》", ""]
+    if project.credits:
+        lines += ["出处与署名：" + "；".join(project.credits), ""]
+    if project.notice:
+        lines += [f"声明：{project.notice}", ""]
     lines += ["发布前检查：", "- 在抖音发布页勾选「作品含 AI 生成内容」（画面右上角已有「AI生成」角标，文件元数据已写入 AIGC 标识）",
               "- 核对字幕里的诗句、史实和数字"]
     issues = [i for i in (project.check or {}).get("issues") or [] if not i.get("resolved")]
@@ -169,7 +194,13 @@ def _still_clip(image: Path, out: Path, length: float, w: int, h: int) -> None:
 
 
 def render(project: Project, ws: Workspace, font: str, font_file: Path, bgm: Path | None = None,
-           bgm_volume: float = 0.25, ai_label: bool = True) -> Path:
+           bgm_volume: float = 0.25, ai_label: bool = True, card_font: tuple[str, Path] | None = None) -> Path:
+    if not can_burn_subtitles():  # checked first: never ship a film without its subtitles and AI label
+        raise RuntimeError(SUBTITLES_MISSING)
+    if project.is_drama:  # lengths from the script, kept clip sound, layered subtitles: see drama.py
+        from . import drama
+        return drama.render(project, ws, font, font_file, card_font or (font, font_file), bgm=bgm,
+                            bgm_volume=bgm_volume, ai_label=ai_label)
     if project.aspect not in SIZES:
         raise ValueError(f"不支持的画幅 {project.aspect}")
     w, h = SIZES[project.aspect]
@@ -216,7 +247,7 @@ def render(project: Project, ws: Workspace, font: str, font_file: Path, bgm: Pat
     fonts_dir = build / "fonts"
     fonts_dir.mkdir(exist_ok=True)
     if not (fonts_dir / font_file.name).exists():
-        shutil.copy2(font_file, fonts_dir / font_file.name)
+        shutil.copyfile(font_file, fonts_dir / font_file.name)  # not copy2: system fonts carry flags it cannot copy
     (build / "subs.ass").write_text(build_ass(project, font, starts, ai_label), encoding="utf-8")
     final = out_dir / "final.mp4"
     ffmpeg(["-i", "video.mp4", "-i", "mix.wav", "-vf", "subtitles=subs.ass:fontsdir=fonts",
