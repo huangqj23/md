@@ -27,9 +27,9 @@
 
 独立示例（不在 workspace 内）：`docs/examples/wechat-openapi-worker/` — 微信公众号 OpenAPI 代理 Worker。
 
-`apps/ai-daily` 是 Python 项目（AI 早报流水线，见其 README），不在 pnpm workspace 内，也不参与 ESLint；浏览器扩展的「AI 早报」面板通过 Native Messaging 调用它（见 [docs/ai-daily.md](./docs/ai-daily.md)）。测试：`apps/ai-daily/.venv/Scripts/python -m pytest`。
+`apps/ai-daily` 是 Python 项目（AI 早报流水线，见其 README），不在 pnpm workspace 内，也不参与 ESLint；浏览器扩展的「AI 早报」面板通过 Native Messaging 调用它（见 [docs/ai-daily.md](./docs/ai-daily.md)）。测试：`apps/ai-daily/.venv/Scripts/python -m pytest`（macOS / Linux 用 `.venv/bin/python`）。
 
-`apps/ai-video` 也是 Python 项目（AI 短视频流水线：剧本由 Claude 用 `short-video` skill 在对话里写成 JSON，`ai-video new --script` 导入后出片；`ai-video bench` 模型对比测试；图像 / 视频 / 配音走方舟 Agent Plan、MiniMax M Plan、Gemini API，见其 README），同样不在 pnpm workspace 内，流水线不调用任何文本模型 API。测试：`apps/ai-video/.venv/Scripts/python -m pytest`。
+`apps/ai-video` 也是 Python 项目（AI 短视频流水线：剧本由 Claude 用 `short-video` skill 在对话里写成 JSON，`ai-video new --script` 导入后出片；`ai-video bench` 模型对比测试；图像 / 视频 / 配音走方舟 Agent Plan、MiniMax M Plan、Gemini API，见其 README），同样不在 pnpm workspace 内，流水线不调用任何文本模型 API。测试：`apps/ai-video/.venv/Scripts/python -m pytest`（macOS / Linux 用 `.venv/bin/python`）。
 
 ## 常用命令
 

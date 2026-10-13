@@ -4,8 +4,11 @@ description: >-
   Make a Douyin / 抖音 short video with the apps/ai-video pipeline. Claude writes the topic cards
   (选题卡), script and storyboard (剧本、分镜) and the fact check in the conversation as a JSON file
   — never through a language-model API — then drives character references, keyframes, clips and the
-  final cut through the user's Ark Agent Plan, MiniMax M Plan and Gemini subscriptions. Use for
-  短视频、抖音、选题、剧本、分镜, videos about 节气 / 古诗 / 文言文 / 物理 / 长征 / 神话 / 名画, or /short-video.
+  final cut through the user's Ark Agent Plan, MiniMax M Plan and Gemini subscriptions (until the Ark key
+  arrives: MiniMax H3 video and a GPT Image relay for keyframes). Two forms: narration films (旁白片, 9:16,
+  TTS voice-over) and dramas (剧情片, 16:9, dialogue spoken by the video model, group portraits / first
+  person / memorial). Use for 短视频、抖音、选题、剧本、分镜、剧情片、群像, videos about 节气 / 古诗 / 文言文 /
+  物理 / 长征 / 神话 / 名画 / 历史人物, or /short-video.
 ---
 
 # 短视频出片
@@ -19,12 +22,14 @@ description: >-
 3. **不显示、不复述任何 Key**，不提交 `.env`。
 4. **引用的诗文和史实一字不差**：核对过的才能写进旁白。
 5. **红色题材**：尊重史实，不生成领袖和英烈的写实正脸，画面用群像、远景和象征意象。
-6. **画面里不要文字。** 字幕、标题都在后期叠加。
+6. **画面里不要文字。** 字幕、标题、章节标签、金句卡都在后期叠加。
 7. **AI 标识不能去掉。** 成片右上角的「AI生成」角标和元数据由流水线自动加。
 
 ## 环境
 
-- 工作目录 `apps/ai-video`，命令是 `.venv/Scripts/ai-video`。
+- 工作目录 `apps/ai-video`，命令是 `.venv/Scripts/ai-video`（Windows）或 `.venv/bin/ai-video`（macOS）。
+- 合成要用带 libass 的 ffmpeg（能烧字幕）。`ai-video check` 会提示。Homebrew 默认的 ffmpeg 是精简版，合成会报错；改装 `ffmpeg-full`：`brew install ffmpeg-full && brew unlink ffmpeg && brew link --force ffmpeg-full`。
+- 方舟 Key 到位前：视频全走 MiniMax H3（扣 M Plan 周额度，约每秒 0.41%，一周约 245 秒），关键帧走 gpt-image-2.5 中转。H3 没有便宜的草稿档。
 - 在 Bash 里运行时，在命令前加 `PYTHONIOENCODING=utf-8`，否则中文输出会乱码。
 - 程序没有终端可交互时，会打印预计花费后退出，并提示「加 -y 重新运行」。这是预期行为。
 - 退出码：0 正常；1 用户拒绝、超预算或超额度；2 剧本或参数有错。
@@ -43,9 +48,12 @@ description: >-
 
 ### 2. 剧本和分镜
 
-1. 读 [references/script-schema.md](references/script-schema.md)、[references/storyboard-rules.md](references/storyboard-rules.md) 和 [references/voice.md](references/voice.md)。
-2. 写到 `apps/ai-video/data/scripts/<YYYYMMDD>-<拼音>.json`，用 Write 工具，编码 UTF-8。
-3. 有人物出镜就声明 `characters`，在镜头里用 `refs` 引用。每个镜头最多 2 个角色。
+1. **先定形态**，和选题卡一起让用户确认：
+   - **旁白片**（默认）：9:16、约 60 秒、TTS 旁白铺满，适合节气、古诗讲解、物理科普。
+   - **剧情片**（`template: "drama"`）：16:9、90–180 秒、角色台词由视频模型原生生成，适合群像、第一人称、纪念人物。先读 [references/templates.md](references/templates.md) 选模板。
+2. 读 [references/script-schema.md](references/script-schema.md)、[references/storyboard-rules.md](references/storyboard-rules.md) 和 [references/voice.md](references/voice.md)。
+3. 写到 `apps/ai-video/data/scripts/<YYYYMMDD>-<拼音>.json`，用 Write 工具，编码 UTF-8。
+4. 有人物出镜就声明 `characters`，在镜头里用 `refs` 引用。每个镜头最多 2 个角色。剧情片里有台词的角色要写 `voice_desc`；反复出现的场景声明成 `scenes`。
 
 ### 3. 事实核查
 
@@ -58,7 +66,7 @@ description: >-
 
 1. 先运行 `ai-video new --script <文件> --until characters --estimate`，把预估报给用户，确认后去掉 `--estimate`、加 `-y` 执行。
    - `new` 会建项目，提示里有项目 id。之后一律用 `make <id>` 继续，不要再跑 `new`。
-2. 用 Read 工具看 `data/projects/<id>/characters/*.png`。
+2. 用 Read 工具看 `data/projects/<id>/characters/*.png`（剧情片还有 `scenes/*.png`）。
 3. **一帧先行**：新风格或新角色，在批量出图前先把方向定下来。
    - 不满意，就改 `look`，再用 `ai-video script <id> <文件>` 重新导入。这样只重做这个角色的参考图。
    - 重要选题可以先写 2–3 个只有 1–2 个镜头的小剧本，各自试一种风格，让用户挑一个方向。
@@ -66,12 +74,12 @@ description: >-
 ### 5. 关键帧
 
 1. 运行 `make <id> --until keyframes`，同样先 `--estimate`，确认后再 `-y`。
-2. 运行 `ai-video sheet <id>`，用 Read 看 `sheets/keyframes.jpg`，按 [references/review.md](references/review.md) 逐镜检查。
+2. 运行 `ai-video sheet <id>`，用 Read 看 `sheets/keyframes.jpg`，按 [references/review.md](references/review.md) 逐镜检查。参考模式（`mode: "ref"`）的镜头和金句卡没有关键帧。
 3. 有问题的镜头：改 JSON 后用 `ai-video script <id> <文件>` 重新导入（只重做改动的镜头），或者用 `make <id> --redo s03`。
 
 ### 6. 视频（检查点 C）
 
-1. 镜头多、节奏没把握时，先出草稿：`make <id> --draft -y`，用 Seedance 2.0 Mini 480p，每秒约 115 AFP。
+1. 镜头多、节奏没把握时，先出草稿：`make <id> --draft -y`，用 Seedance 2.0 Mini 480p，每秒约 115 AFP。方舟到位前视频走 H3，没有草稿档：关键帧联系表要看仔细，再直接出正式版。
 2. 用 `sheet <id> --what clips` 查看草稿。
 3. 草稿通过后出正式版：`make <id> --revideo all -y`，用 Seedance 2.5 720p，每秒约 756 AFP（约 ¥1.5）。
 4. 镜头少、把握大时，可以跳过草稿，直接出正式版。
@@ -80,6 +88,7 @@ description: >-
 
 1. 运行 `make <id> -y` 合成成片，再运行 `sheet <id> --what final` 生成抽帧联系表。
 2. 派一个没参与制作的 subagent，只给它这三样东西：联系表、`out/final.srt` 和 `out/publish.md`。让它按 review.md 的「成片」一节挑问题。
+   - 剧情片的台词你听不到：机器上有 Whisper 的话，把 `clips/*.mp4` 转写一遍，核对台词有没有念错；声音合不合人物年纪，请用户听。
 3. 交付给用户：
    - 成片路径和 `publish.md`；
    - 本项目花费（命令末尾会打印）和 `ai-video quota` 的结果；
@@ -95,3 +104,5 @@ description: >-
 | Seedance 拒收（写实人脸） | 流水线会自动转 H3；以后预期是写实人脸的镜头，直接标 `photoreal: true` |
 | 关键帧被拒 | 去掉真人名人名、敏感词或过于暴露的描述；人物是未成年人时，服装一律写端庄长款 |
 | 物理公式、受力图 | 本期 AI 视频只拍现象，公式写在旁白和字幕里。用 huashu-art-motion 代码绘制的动画镜头是下一阶段的计划 |
+| 合成报错「没有 subtitles 滤镜（缺 libass）」 | 换完整版 ffmpeg，见「环境」 |
+| 台词念错、声音不合年纪 | 改 `line` 或角色的 `voice_desc` 后重新导入，只重做这个镜头的视频；实在不行，把 `providers.yaml` 的 `routing.dialogue` 改成 `tts`，台词改用 TTS 配（只适合远景） |

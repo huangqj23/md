@@ -58,6 +58,7 @@ web-ext.config.ts
 .claude/skills/*
 !.claude/skills/create-pr
 !.claude/skills/git-commit
+!.claude/skills/short-video
 !.claude/skills/wechat-svg
 
 # vite-plugin-pwa dev output
